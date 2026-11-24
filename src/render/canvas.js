@@ -265,6 +265,41 @@ export class MindMapCanvas {
         const ty = to.y + to.h / 2;
         d = `M ${from.x} ${from.y} L ${tx} ${ty}`;
         strokeW = 1.8;
+      } else if (style === 'brace-group') {
+        // Genuine XMind-style continuous typographic curly brace { / } spanning sibling vertical bounds
+        const fx = dir >= 0 ? from.x + from.w : from.x;
+        const fy = from.y + from.h / 2;
+        const topY = e.first.y + e.first.h / 2;
+        const botY = e.last.y + e.last.h / 2;
+        const tipX = dir >= 0 ? e.first.x - 4 : e.first.x + e.first.w + 4;
+        const midX = (fx + tipX) / 2;
+        const r = Math.min(12, Math.max(4, Math.abs(botY - topY) / 6));
+        if (Math.abs(botY - topY) < 4) {
+          d = `M ${fx} ${fy} L ${tipX} ${topY}`;
+        } else {
+          const sx = dir >= 0 ? 1 : -1;
+          d = `M ${tipX} ${topY} Q ${midX + sx * 2} ${topY} ${midX} ${topY + r} L ${midX} ${fy - r} Q ${midX} ${fy} ${fx} ${fy} Q ${midX} ${fy} ${midX} ${fy + r} L ${midX} ${botY - r} Q ${midX + sx * 2} ${botY} ${tipX} ${botY}`;
+        }
+        strokeW = 2.2;
+      } else if (style === 'timeline-rail') {
+        const fx = from.x + from.w;
+        const fy = 0;
+        const tx = to.x;
+        const ty = 0;
+        d = `M ${fx} ${fy} L ${tx} ${ty}`;
+        strokeW = 3.5;
+      } else if (style === 'timeline-v-rail') {
+        const fx = 0;
+        const fy = from.y + from.h;
+        const tx = 0;
+        const ty = to.y;
+        d = `M ${fx} ${fy} L ${tx} ${ty}`;
+        strokeW = 3.5;
+      } else if (style === 'timeline-sub-up' || style === 'timeline-sub-down') {
+        const tx = to.x;
+        const ty = to.y + to.h / 2;
+        d = `M ${e.stemX} ${e.anchorY} L ${e.stemX} ${ty} L ${tx} ${ty}`;
+        strokeW = 2;
       } else if (style === 'timeline-spine') {
         const cx = to.x + to.w / 2;
         const ty = e.above ? to.y + to.h : to.y;
@@ -487,6 +522,18 @@ export class MindMapCanvas {
     const stroke = selected ? '#4f46e5' : visual.border;
     const strokeW = selected ? 2.6 : (depth === 0 ? 2 : 1.5);
     const fill = visual.fill;
+
+    if (item.isTableCell) {
+      const cellFill = depth === 0 ? visual.fill : (depth === 1 ? `${visual.branchColor}20` : visual.fill);
+      el('rect', {
+        x, y, width: w, height: h, rx: 0,
+        fill: cellFill,
+        stroke: selected ? '#4f46e5' : (depth <= 1 ? visual.branchColor : visual.border),
+        'stroke-width': selected ? 2.5 : 1.3,
+        class: 'node-shape'
+      }, g);
+      return;
+    }
 
     if (visual.shape === 'underline') {
       el('rect', { x, y, width: w, height: h, fill: selected ? 'rgba(79,70,229,0.08)' : 'transparent', rx: 6, class: 'node-shape' }, g);
@@ -1145,11 +1192,14 @@ export class MindMapCanvas {
           const item = this.layout.nodeMap.get(id);
           this.draggingNode = {
             id,
+            depth: item.depth,
             floatingId,
             startClientX: e.clientX,
             startClientY: e.clientY,
             origX: item.x,
             origY: item.y,
+            autoX: item.autoX !== undefined ? item.autoX : item.x,
+            autoY: item.autoY !== undefined ? item.autoY : item.y,
             moved: false,
             targetId: null
           };
@@ -1292,6 +1342,30 @@ export class MindMapCanvas {
           } else if (drag.floatingId) {
             const world = this.screenToWorld(e.clientX, e.clientY);
             store.moveFloatingTopic(drag.floatingId, world.x - 40, world.y);
+          } else if (drag.depth === 1) {
+            // XMind-style Main Branch Free-Positioning!
+            const sheet = store.getActiveSheet();
+            const deltaX = (e.clientX - drag.startClientX) / this.scale;
+            const deltaY = (e.clientY - drag.startClientY) / this.scale;
+            const newX = drag.origX + deltaX;
+            const newY = drag.origY + deltaY;
+            const rootItem = this.layout?.rootItem;
+            const curNode = store.findNode(drag.id);
+
+            if (sheet.structure === 'mindmap' && rootItem && curNode) {
+              const rootMidX = rootItem.x + rootItem.w / 2;
+              const droppedCenterX = newX + (this.layout.nodeMap.get(drag.id)?.w || 100) / 2;
+              const targetSide = droppedCenterX < rootMidX ? 'left' : 'right';
+              const prevSide = this.layout.nodeMap.get(drag.id)?.dir === -1 ? 'left' : 'right';
+              if (targetSide !== prevSide) {
+                // Crossed center line -> flip side cleanly & reset offset for natural balance
+                store.setBranchOffset(drag.id, 0, Math.round(newY - drag.autoY), targetSide);
+              } else {
+                store.setBranchOffset(drag.id, Math.round(newX - drag.autoX), Math.round(newY - drag.autoY));
+              }
+            } else {
+              store.setBranchOffset(drag.id, Math.round(newX - drag.autoX), Math.round(newY - drag.autoY));
+            }
           }
         }
       }
@@ -1437,11 +1511,14 @@ export class MindMapCanvas {
             touchMode = 'node-drag';
             this.draggingNode = {
               id,
+              depth: item.depth,
               floatingId,
               startClientX: t.clientX,
               startClientY: t.clientY,
               origX: item.x,
               origY: item.y,
+              autoX: item.autoX !== undefined ? item.autoX : item.x,
+              autoY: item.autoY !== undefined ? item.autoY : item.y,
               moved: true,
               targetId: null
             };
@@ -1542,6 +1619,11 @@ export class MindMapCanvas {
         } else if (drag.floatingId && e.changedTouches?.[0]) {
           const world = this.screenToWorld(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
           store.moveFloatingTopic(drag.floatingId, world.x - 40, world.y);
+        } else if (drag.depth === 1 && e.changedTouches?.[0]) {
+          const ct = e.changedTouches[0];
+          const newX = drag.origX + (ct.clientX - drag.startClientX) / this.scale;
+          const newY = drag.origY + (ct.clientY - drag.startClientY) / this.scale;
+          store.setBranchOffset(drag.id, Math.round(newX - drag.autoX), Math.round(newY - drag.autoY));
         }
       }
       if (e.touches.length === 0) {

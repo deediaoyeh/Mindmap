@@ -216,18 +216,35 @@ export function computeSheetLayout(sheet) {
 
     let childrenTotalH = item.children.reduce((acc, c) => acc + c.subH, 0) + V_GAP * (item.children.length - 1);
     let curY = cy - childrenTotalH / 2;
-    const nextX = dir >= 0 ? item.x + item.w + H_GAP : item.x - H_GAP;
+    const isBrace = item.structure === 'brace-map';
+    const nextX = dir >= 0 ? item.x + item.w + (isBrace ? 42 : H_GAP) : item.x - (isBrace ? 42 : H_GAP);
 
     for (const c of item.children) {
       placeHorizontalSubtree(c, nextX, curY, dir, lineStyle);
+      if (!isBrace) {
+        edges.push({
+          from: item,
+          to: c,
+          color: c.visual.branchColor,
+          style: lineStyle,
+          dir
+        });
+      }
+      curY += c.subH + V_GAP;
+    }
+
+    if (isBrace && item.children.length > 0) {
+      const first = item.children[0];
+      const last = item.children[item.children.length - 1];
       edges.push({
         from: item,
-        to: c,
-        color: c.visual.branchColor,
-        style: item.structure === 'brace-map' ? 'brace' : lineStyle,
+        to: first,
+        first,
+        last,
+        color: item.depth === 0 ? theme.branchColor : item.visual.branchColor,
+        style: 'brace-group',
         dir
       });
-      curY += c.subH + V_GAP;
     }
   }
 
@@ -352,69 +369,229 @@ export function computeSheetLayout(sheet) {
     }
   }
 
-  // --- Timeline (Horizontal spine with alternating top/bottom branches) ---
+  // --- Timeline Horizontal (XMind-faithful: L1 milestones sit ON the continuous horizontal rail; L2->L3 branch above/below) ---
   function layoutTimeline(rootItem) {
     rootItem.x = 0;
     rootItem.y = -rootItem.h / 2;
+    rootItem.layoutAxis = 'vertical-down';
     const children = rootItem.children;
     if (!children.length) return;
 
-    let curX = rootItem.w + 68;
-    const spineY = 0;
+    let curX = rootItem.w + 56;
+    let prevNode = rootItem;
 
     children.forEach((c, idx) => {
       const above = idx % 2 === 0;
-      measureOrgSubtree(c);
-      const colW = Math.max(c.subW, 140);
-      const cx = curX + colW / 2;
-      const stemY = above ? -56 - c.h : 56;
-      c.x = cx - c.w / 2;
-      c.y = stemY;
-      c.dir = above ? -2 : 2; // vertical marker
+      c.layoutAxis = 'vertical-down';
+      // Measure L2+ subtrees as compact indented vertical trees
+      let subBlockW = c.w;
+      let subBlockH = 0;
+      for (const g of c.children) {
+        measureTreeSubtree(g);
+        subBlockW = Math.max(subBlockW, g.subW + 24);
+        subBlockH += g.subH + 14;
+      }
+      const colW = Math.max(c.w, subBlockW, 130);
+      c.x = curX;
+      c.y = -c.h / 2;
 
       edges.push({
-        from: rootItem,
+        from: prevNode,
         to: c,
         color: c.visual.branchColor,
-        style: 'timeline-spine',
-        spineY,
-        above
+        style: 'timeline-rail'
       });
+      prevNode = c;
 
-      // Place grandchildren vertically away from spine
+      // Branch L2->L3 perpendicularly above or below the milestone
       if (c.children.length) {
-        const gTotalW = c.children.reduce((a, g) => a + g.subW, 0) + 16 * (c.children.length - 1);
-        let gx = cx - gTotalW / 2;
-        for (const g of c.children) {
-          if (above) {
-            placeTimelineSubUp(g, gx + g.subW / 2, c.y - 34);
-          } else {
-            placeOrgSubtree(g, gx + g.subW / 2, c.y + c.h + 34);
+        const stemX = c.x + 18;
+        if (above) {
+          let curY = c.y - 34 - subBlockH + 14;
+          for (const g of c.children) {
+            placeTreeSubtree(g, stemX + 18, curY);
+            edges.push({
+              from: { x: stemX, y: c.y, w: 0, h: 0 },
+              to: g,
+              color: c.visual.branchColor,
+              style: 'timeline-sub-up',
+              stemX,
+              anchorY: c.y
+            });
+            curY += g.subH + 14;
           }
-          edges.push({
-            from: c,
-            to: g,
-            color: g.visual.branchColor,
-            style: above ? 'org-up' : 'org',
-            dir: 0
-          });
-          gx += g.subW + 16;
+        } else {
+          let curY = c.y + c.h + 32;
+          for (const g of c.children) {
+            placeTreeSubtree(g, stemX + 18, curY);
+            edges.push({
+              from: { x: stemX, y: c.y + c.h, w: 0, h: 0 },
+              to: g,
+              color: c.visual.branchColor,
+              style: 'timeline-sub-down',
+              stemX,
+              anchorY: c.y + c.h
+            });
+            curY += g.subH + 14;
+          }
         }
       }
+
       curX += colW + 44;
     });
   }
 
-  function placeTimelineSubUp(item, centerX, bottomY) {
-    item.x = centerX - item.w / 2;
-    item.y = bottomY - item.h;
-    if (!item.children.length) return;
-    const totalW = item.children.reduce((a, c) => a + c.subW, 0) + 16 * (item.children.length - 1);
-    let curX = centerX - totalW / 2;
-    for (const c of item.children) {
-      placeTimelineSubUp(c, curX + c.subW / 2, item.y - 34);
-      edges.push({ from: item, to: c, color: c.visual.branchColor, style: 'org-up', dir: 0 });
-      curX += c.subW + 16;
+  // --- Timeline Vertical (XMind Vertical Timeline: L1 milestones stack on central vertical rail; L2->L3 branch left/right) ---
+  function layoutTimelineVertical(rootItem) {
+    rootItem.x = -rootItem.w / 2;
+    rootItem.y = 0;
+    rootItem.layoutAxis = 'tree-vertical';
+    const children = rootItem.children;
+    if (!children.length) return;
+
+    let curY = rootItem.h + 52;
+    let prevNode = rootItem;
+
+    children.forEach((c, idx) => {
+      const dir = idx % 2 === 0 ? 1 : -1;
+      c.dir = dir;
+      c.layoutAxis = 'horizontal';
+      let subsTotalH = 0;
+      for (const g of c.children) {
+        measureHorizontalSubtree(g, dir);
+        subsTotalH += g.subH;
+      }
+      if (c.children.length > 1) subsTotalH += V_GAP * (c.children.length - 1);
+      const rowH = Math.max(c.h, subsTotalH);
+
+      c.x = -c.w / 2;
+      c.y = curY + (rowH - c.h) / 2;
+
+      edges.push({
+        from: prevNode,
+        to: c,
+        color: c.visual.branchColor,
+        style: 'timeline-v-rail'
+      });
+      prevNode = c;
+
+      if (c.children.length) {
+        let gy = curY + (rowH - subsTotalH) / 2;
+        const startX = dir === 1 ? c.x + c.w + 46 : c.x - 46;
+        for (const g of c.children) {
+          placeHorizontalSubtree(g, startX, gy, dir, sheet.lineStyle);
+          edges.push({ from: c, to: g, color: c.visual.branchColor, style: sheet.lineStyle, dir });
+          gy += g.subH + V_GAP;
+        }
+      }
+      curY += rowH + 40;
+    });
+  }
+
+  // --- Tree Table (XMind Icicle / Flush Partition Table: zero branch lines, tightly packed hierarchical cells) ---
+  function layoutTreeTable(rootItem) {
+    const colWidths = [];
+    function scanWidths(item) {
+      colWidths[item.depth] = Math.max(colWidths[item.depth] || 132, item.w + 14);
+      for (const c of item.children) scanWidths(c);
+    }
+    scanWidths(rootItem);
+
+    function measureHeight(item) {
+      item.isTableCell = true;
+      item.layoutAxis = 'horizontal';
+      if (!item.children.length) {
+        item.tableH = Math.max(item.h + 8, 42);
+        return item.tableH;
+      }
+      let sum = 0;
+      for (const c of item.children) sum += measureHeight(c);
+      item.tableH = Math.max(item.h + 8, sum);
+      return item.tableH;
+    }
+    measureHeight(rootItem);
+
+    function placeCells(item, colX, topY, availH) {
+      item.x = colX;
+      item.y = topY;
+      item.w = colWidths[item.depth];
+      item.h = availH;
+      item.isTableCell = true;
+      if (!item.children.length) return;
+      const sumKids = item.children.reduce((a, c) => a + c.tableH, 0);
+      const scaleH = sumKids > 0 ? availH / sumKids : 1;
+      let curY = topY;
+      for (const c of item.children) {
+        const ch = c.tableH * scaleH;
+        placeCells(c, colX + item.w, curY, ch);
+        curY += ch;
+      }
+    }
+    placeCells(rootItem, 0, 0, rootItem.tableH);
+  }
+
+  // --- Matrix (XMind 2D Classification Grid: L0 top banner, L1 row headers, L2 column cells, L3 stacked items) ---
+  function layoutMatrix(rootItem) {
+    const CELL_GAP = 14;
+    const ROW_HEADER_W = Math.max(150, ...rootItem.children.map(c => c.w + 18));
+
+    // Determine max columns across L1 rows & width per column
+    const colWidths = [];
+    for (const row of rootItem.children) {
+      row.children.forEach((cell, cIdx) => {
+        let cw = Math.max(cell.w + 16, 160);
+        for (const sub of cell.children) {
+          measureTreeSubtree(sub);
+          cw = Math.max(cw, sub.subW + 28);
+        }
+        colWidths[cIdx] = Math.max(colWidths[cIdx] || 160, cw);
+      });
+    }
+    const totalColsW = colWidths.reduce((a, w) => a + w + CELL_GAP, 0);
+    const totalW = Math.max(rootItem.w + 40, ROW_HEADER_W + CELL_GAP + Math.max(totalColsW, 200));
+
+    rootItem.x = 0;
+    rootItem.y = 0;
+    rootItem.w = totalW;
+    rootItem.isTableCell = true;
+    rootItem.layoutAxis = 'vertical-down';
+
+    let curY = rootItem.h + CELL_GAP;
+    for (const row of rootItem.children) {
+      // Measure row height from tallest L2 cell (+ its L3 items)
+      let rowH = Math.max(row.h + 16, 56);
+      for (const cell of row.children) {
+        let cellTotalH = cell.h + 14;
+        for (const sub of cell.children) cellTotalH += sub.subH + 10;
+        rowH = Math.max(rowH, cellTotalH + 10);
+      }
+
+      row.x = 0;
+      row.y = curY;
+      row.w = ROW_HEADER_W;
+      row.h = rowH;
+      row.isTableCell = true;
+      row.layoutAxis = 'horizontal';
+
+      let curX = ROW_HEADER_W + CELL_GAP;
+      row.children.forEach((cell, cIdx) => {
+        const cw = colWidths[cIdx] || 170;
+        cell.x = curX;
+        cell.y = curY;
+        cell.w = cw;
+        cell.layoutAxis = 'horizontal';
+
+        // Place L3 items neatly stacked beneath/inside the L2 cell column
+        let subY = curY + cell.h + 10;
+        for (const sub of cell.children) {
+          placeTreeSubtree(sub, curX + 16, subY);
+          edges.push({ from: cell, to: sub, color: row.visual.branchColor, style: 'tree', dir: 1 });
+          subY += sub.subH + 10;
+        }
+        edges.push({ from: row, to: cell, color: row.visual.branchColor, style: 'straight', dir: 1 });
+        curX += cw + CELL_GAP;
+      });
+      curY += rowH + CELL_GAP;
     }
   }
 
@@ -547,13 +724,44 @@ export function computeSheetLayout(sheet) {
     case 'timeline':
       layoutTimeline(rootItem);
       break;
+    case 'timeline-vertical':
+      layoutTimelineVertical(rootItem);
+      break;
     case 'fishbone':
       layoutFishbone(rootItem);
+      break;
+    case 'tree-table':
+      layoutTreeTable(rootItem);
+      break;
+    case 'matrix':
+      layoutMatrix(rootItem);
       break;
     case 'mindmap':
     default:
       layoutMindMap(rootItem);
       break;
+  }
+
+  // Record auto-computed positions & apply XMind-style Main Branch Free-Positioning offsets
+  function shiftSubtree(item, dx, dy) {
+    item.x += dx;
+    item.y += dy;
+    for (const c of item.children) shiftSubtree(c, dx, dy);
+  }
+  function saveAutoCoords(item) {
+    item.autoX = item.x;
+    item.autoY = item.y;
+    for (const c of item.children) saveAutoCoords(c);
+  }
+  saveAutoCoords(rootItem);
+
+  if (sheet.structure !== 'tree-table' && sheet.structure !== 'matrix') {
+    for (const mainBranch of rootItem.children) {
+      const off = mainBranch.node.customOffset;
+      if (off && (off.x || off.y)) {
+        shiftSubtree(mainBranch, off.x || 0, off.y || 0);
+      }
+    }
   }
 
   // Register main tree nodes

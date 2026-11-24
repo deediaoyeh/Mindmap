@@ -7,12 +7,15 @@ export const STRUCTURES = [
   { id: 'mindmap', name: '心智圖', sub: '雙向輻射', icon: '🧠' },
   { id: 'logic-right', name: '邏輯圖 (右)', sub: '向右展開', icon: '➡️' },
   { id: 'logic-left', name: '邏輯圖 (左)', sub: '向左展開', icon: '⬅️' },
+  { id: 'brace-map', name: '括號圖', sub: '大括號拆解', icon: '🧩' },
   { id: 'org-chart', name: '組織架構圖', sub: '由上而下', icon: '🏛️' },
-  { id: 'org-tree', name: '組織樹狀圖', sub: '垂直子題＋分子題', icon: '📊' },
-  { id: 'tree-chart', name: '樹狀圖', sub: '階層目錄', icon: '🌳' },
-  { id: 'timeline', name: '時間軸', sub: '水平序列', icon: '⏳' },
-  { id: 'fishbone', name: '魚骨圖', sub: '因果分析', icon: '🐟' },
-  { id: 'brace-map', name: '括號圖', sub: '整體拆解', icon: '🧩' }
+  { id: 'org-tree', name: '組織樹狀圖', sub: '橫排＋垂直子題', icon: '📊' },
+  { id: 'tree-chart', name: '樹狀圖', sub: '垂直縮排目錄', icon: '🌳' },
+  { id: 'timeline', name: '水平時間軸', sub: '主軸左右序列', icon: '⏳' },
+  { id: 'timeline-vertical', name: '垂直時間軸', sub: '主軸上下序列', icon: '📅' },
+  { id: 'fishbone', name: '魚骨圖', sub: '因果斜骨分析', icon: '🐟' },
+  { id: 'tree-table', name: '樹狀表格', sub: '無縫階層表格', icon: '🗂️' },
+  { id: 'matrix', name: '矩陣圖', sub: '二維分類比較', icon: '▦' }
 ];
 
 export const LINE_STYLES = [

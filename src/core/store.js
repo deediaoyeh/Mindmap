@@ -574,6 +574,29 @@ class MindFlowStore {
     }, 'move');
   }
 
+  /**
+   * XMind-style Main Branch Free-Positioning: move a Depth-1 branch freely on canvas,
+   * optionally flipping side (left/right) in balanced Mind Map mode.
+   */
+  setBranchOffset(nodeId, dx, dy, newSide = undefined) {
+    this.mutate((s) => {
+      const node = this.findNode(nodeId, s);
+      if (!node) return;
+      node.customOffset = { x: Math.round(dx), y: Math.round(dy) };
+      if (newSide !== undefined) node.side = newSide;
+    }, 'move');
+  }
+
+  resetAllBranchOffsets() {
+    this.mutate((s) => {
+      const clear = (n) => {
+        if (n.customOffset) delete n.customOffset;
+        for (const c of (n.children || [])) clear(c);
+      };
+      clear(s.root);
+    }, 'tree');
+  }
+
   // --- Structural Annotations ---
 
   addRelationship(fromId, toId, label = '關聯') {

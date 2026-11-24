@@ -140,6 +140,7 @@ export class InspectorPanel {
           <button class="btn btn-sm" id="map-expand-all" style="flex:1;">全部展開</button>
           <button class="btn btn-sm" id="map-collapse-all" style="flex:1;">全部摺疊</button>
         </div>
+        <button class="btn btn-sm" id="map-reset-offsets" title="將所有手動拖曳移動過的主要分支恢復為自動平衡對齊" style="width:100%;">⚖️ 自動平衡 / 重設分支位置</button>
       </div>
     `;
   }
@@ -166,6 +167,10 @@ export class InspectorPanel {
     this.el.querySelector('#map-bg-reset')?.addEventListener('click', () => store.updateSheet({ customBg: '' }));
     this.el.querySelector('#map-expand-all').onclick = () => store.setAllCollapsed(false);
     this.el.querySelector('#map-collapse-all').onclick = () => store.setAllCollapsed(true);
+    this.el.querySelector('#map-reset-offsets').onclick = () => {
+      store.resetAllBranchOffsets();
+      showToast('已恢復所有主要分支為自動平衡排列', 'success');
+    };
   }
 
   _renderRelTab(rel) {

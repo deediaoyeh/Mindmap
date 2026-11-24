@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mindflow-offline-v7';
+const CACHE_NAME = 'mindflow-offline-v8';
 const CORE_ASSETS = [
   './',
   './index.html',
