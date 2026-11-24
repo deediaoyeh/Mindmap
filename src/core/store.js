@@ -4,6 +4,7 @@
  * node CRUD, drag-and-drop reparenting, search/filter, and localStorage sync.
  */
 
+import { scheduleAutoSaveToDisk } from './localFile.js';
 import { createDocument, createNode, createSheet, createWelcomeDocument, uid } from './schema.js';
 
 const STORAGE_DOCS_KEY = 'mindflow_docs_v1';
@@ -82,7 +83,10 @@ class MindFlowStore {
   _saveToStorage() {
     try {
       const doc = this.getActiveDoc();
-      if (doc) doc.updatedAt = new Date().toISOString();
+      if (doc) {
+        doc.updatedAt = new Date().toISOString();
+        scheduleAutoSaveToDisk(doc, () => this.notify('ui'));
+      }
       localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(this.docs));
       localStorage.setItem(STORAGE_ACTIVE_KEY, this.activeDocId || '');
     } catch (e) {

@@ -7,6 +7,12 @@
  */
 
 import { gdrive } from '../core/gdrive.js';
+import {
+  getStorageBadgeInfo,
+  pickAndBindSaveFile,
+  supportsFileSystemPicker,
+  writeDocToHandle
+} from '../core/localFile.js';
 import { formatBytes, getMediaObjectUrl } from '../core/mediaDb.js';
 import { createNode, createSheet, TEMPLATES } from '../core/schema.js';
 import { store } from '../core/store.js';
@@ -62,10 +68,14 @@ export class ModalManager {
   }
 
   // =========================================================================
-  // 0. Create New File Dialog
+  // 0. Create New File Dialog (with explicit Storage Location & Google Drive Folder Picker)
   // =========================================================================
   openNewFile() {
     const defaultName = `心智圖 ${store.docs.length + 1}`;
+    const defaultDriveRoot = gdrive.getDefaultRootFolder();
+    const canPickLocal = supportsFileSystemPicker();
+    const driveConnected = gdrive.isConnected();
+
     this._open(`
       <div class="modal-header">
         <h3>📄 建立新心智圖檔案</h3>
@@ -92,7 +102,67 @@ export class ModalManager {
           </div>
         </div>
 
-        <div style="padding-top:10px;border-top:1px solid var(--ui-border);">
+        <div style="padding:12px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:10px;">
+          <div class="field-label" style="font-weight:700;color:var(--ui-text);">📍 選擇儲存位置</div>
+
+          <div class="storage-options-grid">
+            <label class="storage-option-card active" data-stopt="browser">
+              <input type="radio" name="nf-storage" value="browser" checked />
+              <div>
+                <div style="font-weight:700;font-size:12.5px;">🌐 瀏覽器本機空間</div>
+                <div style="font-size:11px;color:var(--ui-text-muted);margin-top:2px;">立即開始，自動暫存於瀏覽器本機（隨時可另存到電腦或雲端）</div>
+              </div>
+            </label>
+
+            <label class="storage-option-card" data-stopt="local-file">
+              <input type="radio" name="nf-storage" value="local-file" />
+              <div>
+                <div style="font-weight:700;font-size:12.5px;">💻 電腦指定資料夾</div>
+                <div style="font-size:11px;color:var(--ui-text-muted);margin-top:2px;">
+                  ${canPickLocal ? '建立時跳出系統視窗讓你挑選本機資料夾，之後修改自動即時寫回硬碟' : '建立時自動下載 .mindflow.json 到你的本機下載資料夾'}
+                </div>
+              </div>
+            </label>
+
+            <label class="storage-option-card" data-stopt="gdrive">
+              <input type="radio" name="nf-storage" value="gdrive" />
+              <div>
+                <div style="font-weight:700;font-size:12.5px;">☁️ Google 雲端硬碟 ${driveConnected ? '<span style="color:var(--success);">● 已連線</span>' : '<span style="color:var(--ui-text-muted);">(未連線時可於下一步連結)</span>'}</div>
+                <div style="font-size:11px;color:var(--ui-text-muted);margin-top:2px;">預設位置：<code>Google Drive / ${esc(defaultDriveRoot)} /</code>（可選擇是否建立新檔案夾）</div>
+              </div>
+            </label>
+          </div>
+
+          <!-- Dynamic Google Drive Folder Options -->
+          <div id="nf-gdrive-panel" class="hidden" style="padding:10px 12px;border-radius:8px;border:1px solid var(--ui-border);background:var(--ui-surface);display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:12px;font-weight:700;">☁️ Google 雲端硬碟儲存位置設定</div>
+            <div class="grid-2" style="gap:8px;">
+              <div>
+                <div class="field-label" style="margin-bottom:3px;">預設根目錄（可修改）</div>
+                <input id="nf-gd-root" class="ui-input" value="${esc(defaultDriveRoot)}" placeholder="MindFlow" />
+              </div>
+              <div id="nf-gd-existing-wrap" style="${driveConnected ? '' : 'opacity:0.65;'}">
+                <div class="field-label" style="margin-bottom:3px;">或選擇現有子資料夾</div>
+                <select id="nf-gd-existing" class="ui-select" ${driveConnected ? '' : 'disabled'}>
+                  <option value="">（不選現有資料夾）</option>
+                </select>
+              </div>
+            </div>
+            <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;">
+              <input type="checkbox" id="nf-gd-create-folder" checked />
+              <span>在此預設位置下<b>建立新的專屬檔案夾</b>（一併集中存放原檔與節點附件）</span>
+            </label>
+            <div id="nf-gd-newfolder-row">
+              <div class="field-label" style="margin-bottom:3px;">新檔案夾名稱</div>
+              <input id="nf-gd-subfolder" class="ui-input" value="${esc(defaultName)}" placeholder="輸入新檔案夾名稱..." />
+            </div>
+          </div>
+
+          <!-- Live Final Storage Path Preview -->
+          <div id="nf-path-preview" style="font-size:12px;padding:7px 10px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font-weight:600;word-break:break-all;"></div>
+        </div>
+
+        <div style="padding-top:8px;border-top:1px solid var(--ui-border);">
           <div class="field-label" style="margin-bottom:8px;font-weight:600;">或者從其他來源建立</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm" id="nf-from-tpl">📑 從精選範本建立</button>
@@ -104,19 +174,90 @@ export class ModalManager {
       </div>
       <div class="modal-footer">
         <button class="btn" data-close-modal>取消</button>
-        <button class="btn btn-primary" id="nf-create-btn">＋ 立即建立新檔案</button>
+        <button class="btn btn-primary" id="nf-create-btn">＋ 建立並儲存新檔案</button>
       </div>
     `);
 
     const titleEl = this.root.querySelector('#nf-title');
+    const gdPanel = this.root.querySelector('#nf-gdrive-panel');
+    const gdRootEl = this.root.querySelector('#nf-gd-root');
+    const gdCreateCb = this.root.querySelector('#nf-gd-create-folder');
+    const gdSubRow = this.root.querySelector('#nf-gd-newfolder-row');
+    const gdSubEl = this.root.querySelector('#nf-gd-subfolder');
+    const gdExistingSel = this.root.querySelector('#nf-gd-existing');
+    const previewEl = this.root.querySelector('#nf-path-preview');
+    let subEditedManually = false;
+
+    const getSelectedMode = () => this.root.querySelector('input[name="nf-storage"]:checked')?.value || 'browser';
+
+    const updatePreview = () => {
+      const mode = getSelectedMode();
+      const name = (titleEl.value.trim() || defaultName).replace(/[\\/:*?"<>|]/g, '_');
+      this.root.querySelectorAll('.storage-option-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.stopt === mode);
+      });
+      gdPanel.classList.toggle('hidden', mode !== 'gdrive');
+      gdSubRow.classList.toggle('hidden', !gdCreateCb.checked);
+
+      if (mode === 'browser') {
+        previewEl.textContent = `📍 預計儲存位置：瀏覽器本機空間（LocalStorage + IndexedDB）· 檔名：${name}`;
+      } else if (mode === 'local-file') {
+        previewEl.textContent = `📍 預計儲存位置：電腦本機指定資料夾 / ${name}.mindflow.json（按下建立後立即選擇資料夾）`;
+      } else {
+        const rootName = gdRootEl.value.trim() || 'MindFlow';
+        if (gdExistingSel.value) {
+          const optText = gdExistingSel.options[gdExistingSel.selectedIndex]?.textContent || '';
+          previewEl.textContent = `📍 預計儲存位置：Google Drive / ${rootName} / ${optText} / ${name}.mindflow.json`;
+        } else if (gdCreateCb.checked) {
+          const sub = gdSubEl.value.trim() || name;
+          previewEl.textContent = `📍 預計儲存位置：Google Drive / ${rootName} / ${sub}（新建檔案夾）/ ${name}.mindflow.json`;
+        } else {
+          previewEl.textContent = `📍 預計儲存位置：Google Drive / ${rootName}（預設位置，不建新檔案夾）/ ${name}.mindflow.json`;
+        }
+      }
+    };
+
+    // If Google Drive is connected, populate existing subfolders for quick picking
+    if (driveConnected) {
+      gdrive.listSubfoldersInRoot(defaultDriveRoot).then((folders) => {
+        if (!gdExistingSel) return;
+        for (const f of folders) {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          opt.textContent = f.name;
+          opt.dataset.url = f.webViewLink || '';
+          gdExistingSel.appendChild(opt);
+        }
+      }).catch(() => {});
+    }
+
+    titleEl.addEventListener('input', () => {
+      if (!subEditedManually) gdSubEl.value = titleEl.value;
+      updatePreview();
+    });
+    gdSubEl.addEventListener('input', () => { subEditedManually = true; updatePreview(); });
+    gdRootEl.addEventListener('input', updatePreview);
+    gdCreateCb.addEventListener('change', () => {
+      if (gdCreateCb.checked) gdExistingSel.value = '';
+      updatePreview();
+    });
+    gdExistingSel.addEventListener('change', () => {
+      if (gdExistingSel.value) gdCreateCb.checked = false;
+      updatePreview();
+    });
+    this.root.querySelectorAll('input[name="nf-storage"]').forEach(r => r.addEventListener('change', updatePreview));
+
+    updatePreview();
     titleEl.focus();
     titleEl.select();
 
-    const doCreate = () => {
+    const doCreate = async () => {
       const title = titleEl.value.trim() || defaultName;
       const structure = this.root.querySelector('#nf-structure').value;
       const themeId = this.root.querySelector('#nf-theme').value;
+      const mode = getSelectedMode();
       const theme = THEMES[themeId] || THEMES['xmind-classic'];
+
       const sheet = createSheet('畫布 1', createNode(title, {
         children: [createNode('主要分支 1'), createNode('主要分支 2'), createNode('主要分支 3')]
       }), {
@@ -124,9 +265,76 @@ export class ModalManager {
         themeId,
         branchPaletteId: theme.paletteId
       });
-      store.createNewDocument(title, sheet);
+
+      const doc = store.createNewDocument(title, sheet);
+
+      if (mode === 'local-file') {
+        try {
+          const res = await pickAndBindSaveFile(doc);
+          store._saveToStorage();
+          store.notify('doc');
+          this.close();
+          showToast(
+            res.mode === 'local-file'
+              ? `💻 已建立並綁定本機檔案：${res.fileName}`
+              : `📥 已建立並下載檔案：${res.fileName}`,
+            'success',
+            3800
+          );
+        } catch (err) {
+          if (err?.name === 'AbortError') {
+            this.close();
+            showToast('已建立新檔案（目前暫存於瀏覽器本機空間，可隨時點頂部儲存位置另存）');
+          } else {
+            showToast(`本機存檔失敗：${err.message}`, 'error', 4000);
+          }
+        }
+        return;
+      }
+
+      if (mode === 'gdrive') {
+        const rootName = gdRootEl.value.trim() || 'MindFlow';
+        gdrive.setDefaultRootFolder(rootName);
+        doc.driveParentFolderName = rootName;
+
+        if (gdExistingSel.value) {
+          doc.driveFolderId = gdExistingSel.value;
+          doc.driveFolderUrl = gdExistingSel.options[gdExistingSel.selectedIndex]?.dataset?.url || '';
+          doc.driveUseSubfolder = true;
+          doc.driveSubfolderName = gdExistingSel.options[gdExistingSel.selectedIndex]?.textContent || title;
+        } else {
+          doc.driveUseSubfolder = gdCreateCb.checked;
+          doc.driveSubfolderName = gdCreateCb.checked ? (gdSubEl.value.trim() || title) : '';
+        }
+        doc.storageLocation = { type: 'gdrive', label: gdrive.getDocTargetPathLabel(doc) };
+        store._saveToStorage();
+        store.notify('doc');
+
+        if (gdrive.isConnected()) {
+          try {
+            showToast(`☁️ 正在儲存至 ${gdrive.getDocTargetPathLabel(doc)}...`);
+            await gdrive.syncDocument(doc, (d) => buildXMindBlob(d));
+            store._saveToStorage();
+            store.notify('doc');
+            this.close();
+            showToast(`☁️ 已成功建立並儲存至 ${gdrive.getDocTargetPathLabel(doc)}`, 'success', 4200);
+          } catch (err) {
+            this.close();
+            showToast(`已建立檔案，但雲端同步失敗：${err.message}`, 'error', 4500);
+          }
+        } else {
+          this.openGoogleDrive();
+          showToast(`已建立新檔案並記住目標路徑，請連線 Google 帳號以完成雲端建立！`, 'info', 4200);
+        }
+        return;
+      }
+
+      // Default: browser storage
+      doc.storageLocation = { type: 'browser', label: '瀏覽器本機空間' };
+      store._saveToStorage();
+      store.notify('doc');
       this.close();
-      showToast(`已建立新檔案「${title}」`, 'success');
+      showToast(`已建立新檔案「${title}」（儲存於瀏覽器本機空間）`, 'success');
     };
 
     this.root.querySelector('#nf-create-btn').onclick = doCreate;
@@ -141,6 +349,162 @@ export class ModalManager {
     this.root.querySelector('#nf-from-file').onclick = () => {
       this.close();
       document.getElementById('global-file-input')?.click();
+    };
+  }
+
+  // =========================================================================
+  // 0.5 Current File Storage Location & Save Settings Dialog
+  // =========================================================================
+  openStorageSettings() {
+    const doc = store.getActiveDoc();
+    const badge = getStorageBadgeInfo(doc);
+    const defaultRoot = doc.driveParentFolderName || gdrive.getDefaultRootFolder();
+    const useSub = doc.driveUseSubfolder !== false;
+    const subName = doc.driveSubfolderName || doc.title;
+
+    this._open(`
+      <div class="modal-header">
+        <h3>📍 檔案儲存位置管理 · ${esc(doc.title)}</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="nlm-hero" style="margin-bottom:0;">
+          <div style="font-size:12px;color:var(--ui-text-secondary);margin-bottom:4px;">目前儲存位置</div>
+          <div style="font-size:15px;font-weight:700;">${badge.icon} ${esc(badge.fullLabel)}</div>
+          <div style="font-size:11.5px;color:var(--ui-text-muted);margin-top:4px;">最後修改時間：${new Date(doc.updatedAt).toLocaleString()}</div>
+        </div>
+
+        <div style="padding:14px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:8px;">
+          <div style="font-weight:700;font-size:13px;">💻 儲存到電腦本機指定位置</div>
+          <div style="font-size:12px;color:var(--ui-text-secondary);">
+            ${supportsFileSystemPicker()
+              ? '點選下方按鈕可開啟電腦資料夾視窗，指定儲存為實體 <code>.mindflow.json</code> 檔案，之後每次編輯都會自動寫回硬碟（亦可用 <code>Cmd/Ctrl + S</code> 立即存檔）。'
+              : '目前瀏覽器不支援直接寫入硬碟路徑，點擊將下載 <code>.mindflow.json</code> 原始檔到您的本機下載資料夾。'}
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="st-pick-local-btn">📂 選擇 / 變更電腦儲存位置</button>
+            ${doc.storageLocation?.type === 'local-file' ? `<button class="btn" id="st-save-now-btn">💾 立即存檔 (Cmd/Ctrl+S)</button>` : ''}
+            <button class="btn" id="st-export-xmind-btn">另存標準 .xmind</button>
+          </div>
+        </div>
+
+        <div style="padding:14px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:8px;">
+          <div style="font-weight:700;font-size:13px;">☁️ 儲存到 Google 雲端硬碟</div>
+          <div style="font-size:12px;color:var(--ui-text-secondary);">
+            預設位置：<code>Google Drive / ${esc(defaultRoot)} /</code>
+          </div>
+          <div class="grid-2" style="gap:8px;">
+            <div>
+              <div class="field-label" style="margin-bottom:3px;">雲端預設根資料夾</div>
+              <input id="st-gd-root" class="ui-input" value="${esc(defaultRoot)}" />
+            </div>
+            <div>
+              <div class="field-label" style="margin-bottom:3px;">新檔案夾名稱（若啟用）</div>
+              <input id="st-gd-sub" class="ui-input" value="${esc(subName)}" ${useSub ? '' : 'disabled'} />
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="st-gd-usesub" ${useSub ? 'checked' : ''} />
+            <span>在預設位置下建立獨立檔案夾（否則直接存於預設根資料夾）</span>
+          </label>
+          <div id="st-gd-preview" style="font-size:12px;color:var(--accent);font-weight:600;"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="st-gd-save-btn">☁️ ${gdrive.isConnected() ? '立即同步到此雲端位置' : '前往連線 Google 雲端硬碟'}</button>
+            ${doc.driveFolderUrl ? `<a class="btn" href="${esc(doc.driveFolderUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">📂 開啟目前雲端資料夾</a>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-close-modal>關閉</button>
+      </div>
+    `);
+
+    const gdRoot = this.root.querySelector('#st-gd-root');
+    const gdSub = this.root.querySelector('#st-gd-sub');
+    const gdUseSub = this.root.querySelector('#st-gd-usesub');
+    const gdPrev = this.root.querySelector('#st-gd-preview');
+
+    const refreshGdPrev = () => {
+      gdSub.disabled = !gdUseSub.checked;
+      const r = gdRoot.value.trim() || 'MindFlow';
+      const s = gdSub.value.trim() || doc.title;
+      gdPrev.textContent = gdUseSub.checked
+        ? `📍 雲端目標路徑：Google Drive / ${r} / ${s} / ${doc.title}.mindflow.json`
+        : `📍 雲端目標路徑：Google Drive / ${r} / ${doc.title}.mindflow.json`;
+    };
+    gdRoot.oninput = refreshGdPrev;
+    gdSub.oninput = refreshGdPrev;
+    gdUseSub.onchange = refreshGdPrev;
+    refreshGdPrev();
+
+    this.root.querySelector('#st-pick-local-btn').onclick = async () => {
+      try {
+        const res = await pickAndBindSaveFile(doc);
+        store._saveToStorage();
+        store.notify('doc');
+        showToast(`💻 已更新本機儲存位置：${res.fileName}`, 'success');
+        this.openStorageSettings();
+      } catch (err) {
+        if (err?.name !== 'AbortError') showToast(`選擇位置失敗：${err.message}`, 'error');
+      }
+    };
+
+    this.root.querySelector('#st-save-now-btn')?.addEventListener('click', async () => {
+      try {
+        const ok = await writeDocToHandle(doc);
+        if (ok) {
+          store._saveToStorage();
+          store.notify('doc');
+          showToast('💾 已儲存至本機檔案！', 'success');
+          this.openStorageSettings();
+        } else {
+          showToast('找不到本機檔案權限，請重新點選「選擇／變更電腦儲存位置」', 'error');
+        }
+      } catch (err) {
+        showToast(`存檔失敗：${err.message}`, 'error');
+      }
+    });
+
+    this.root.querySelector('#st-export-xmind-btn').onclick = async () => {
+      await exportXMind();
+      showToast('已匯出標準 .xmind 檔案', 'success');
+    };
+
+    this.root.querySelector('#st-gd-save-btn').onclick = async () => {
+      const r = gdRoot.value.trim() || 'MindFlow';
+      gdrive.setDefaultRootFolder(r);
+      const changedPath =
+        doc.driveParentFolderName !== r ||
+        (doc.driveUseSubfolder !== false) !== gdUseSub.checked ||
+        (doc.driveSubfolderName || doc.title) !== (gdSub.value.trim() || doc.title);
+
+      doc.driveParentFolderName = r;
+      doc.driveUseSubfolder = gdUseSub.checked;
+      doc.driveSubfolderName = gdUseSub.checked ? (gdSub.value.trim() || doc.title) : '';
+      if (changedPath) {
+        doc.driveFolderId = '';
+        doc.driveJsonFileId = '';
+        doc.driveXmindFileId = '';
+      }
+      doc.storageLocation = { type: 'gdrive', label: gdrive.getDocTargetPathLabel(doc) };
+      store._saveToStorage();
+      store.notify('doc');
+
+      if (!gdrive.isConnected()) {
+        this.openGoogleDrive();
+        return;
+      }
+
+      try {
+        showToast(`☁️ 正在同步至 ${gdrive.getDocTargetPathLabel(doc)}...`);
+        await gdrive.syncDocument(doc, (d) => buildXMindBlob(d));
+        store._saveToStorage();
+        store.notify('doc');
+        showToast(`☁️ 已儲存至 ${gdrive.getDocTargetPathLabel(doc)}`, 'success', 3800);
+        this.openStorageSettings();
+      } catch (err) {
+        showToast(`同步失敗：${err.message}`, 'error', 4200);
+      }
     };
   }
 
@@ -639,12 +1003,16 @@ export class ModalManager {
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
             <div>
               <div style="font-weight:700;font-size:13.5px;">目前心智圖：${esc(doc.title)}</div>
+              <div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px;">
+                📍 目標路徑：${esc(gdrive.getDocTargetPathLabel(doc))}
+              </div>
               <div id="gd-sync-status" style="font-size:12px;color:var(--ui-text-muted);margin-top:2px;">
                 ${doc.driveLastSyncedAt ? `上次雲端同步：${new Date(doc.driveLastSyncedAt).toLocaleString()}` : '尚未同步到 Google Drive'}
               </div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              ${doc.driveFolderUrl ? `<a class="btn btn-sm" href="${esc(doc.driveFolderUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">📂 開啟雲端資料夾</a>` : ''}
+              <button class="btn btn-sm" id="gd-change-folder-btn">📂 變更雲端位置 / 檔案夾</button>
+              ${doc.driveFolderUrl ? `<a class="btn btn-sm" href="${esc(doc.driveFolderUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">開啟雲端資料夾</a>` : ''}
               <button class="btn btn-primary" id="gd-sync-now-btn" ${connected ? '' : 'disabled'}>☁️ 立即同步原檔＋附件</button>
             </div>
           </div>
@@ -736,6 +1104,8 @@ export class ModalManager {
       showToast('已中斷 Google Drive 連線');
       this.openGoogleDrive();
     });
+
+    this.root.querySelector('#gd-change-folder-btn')?.addEventListener('click', () => this.openStorageSettings());
 
     this.root.querySelector('#gd-sync-now-btn')?.addEventListener('click', async () => {
       const statusEl = this.root.querySelector('#gd-sync-status');

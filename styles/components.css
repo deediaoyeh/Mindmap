@@ -1155,6 +1155,71 @@
   background: #94a3b8;
 }
 
+/* Storage Location Pill & Picker Cards */
+.storage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  max-width: 150px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface-2);
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: all 0.14s;
+}
+.storage-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.storage-pill.storage-local-file {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+.storage-pill.storage-gdrive {
+  border-color: rgba(79, 70, 229, 0.35);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.storage-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.storage-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.storage-option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1.5px solid var(--ui-border);
+  background: var(--ui-surface);
+  cursor: pointer;
+  transition: all 0.14s;
+}
+.storage-option-card:hover {
+  border-color: var(--ui-border-strong);
+}
+.storage-option-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.storage-option-card input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
 /* Toasts */
 .toast-container {
   position: fixed;

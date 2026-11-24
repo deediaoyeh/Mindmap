@@ -3,6 +3,7 @@
  */
 
 import { gdrive } from '../core/gdrive.js';
+import { getStorageBadgeInfo } from '../core/localFile.js';
 import { store } from '../core/store.js';
 import { MARKER_GROUPS } from '../render/themes.js';
 import { showToast } from './toast.js';
@@ -55,6 +56,10 @@ export class StudioChrome {
         </button>
         <button class="tb-btn" id="tb-new-doc-btn" title="建立新心智圖檔案 (Alt+N)">📄<span class="tb-label-md">新檔案</span></button>
         <input id="doc-title-input" class="doc-title-input" value="${esc(doc.title)}" title="點擊重新命名文件" />
+        <button class="storage-pill storage-${getStorageBadgeInfo(doc).type}" id="tb-storage-pill" title="${esc(getStorageBadgeInfo(doc).fullLabel)}">
+          <span>${getStorageBadgeInfo(doc).icon}</span>
+          <span class="storage-pill-text">${esc(getStorageBadgeInfo(doc).shortLabel)}</span>
+        </button>
         <div class="tb-divider"></div>
         <button class="tb-btn icon-only" id="tb-undo" title="復原 (Cmd/Ctrl+Z)" ${store.canUndo() ? '' : 'disabled'}>↶</button>
         <button class="tb-btn icon-only" id="tb-redo" title="重做 (Cmd/Ctrl+Shift+Z)" ${store.canRedo() ? '' : 'disabled'}>↷</button>
@@ -90,6 +95,7 @@ export class StudioChrome {
     // Bind events
     this.toolbarEl.querySelector('#tb-works-btn').onclick = () => store.toggleLeftDrawer('works');
     this.toolbarEl.querySelector('#tb-new-doc-btn').onclick = () => this.modals.openNewFile();
+    this.toolbarEl.querySelector('#tb-storage-pill').onclick = () => this.modals.openStorageSettings();
     const titleInput = this.toolbarEl.querySelector('#doc-title-input');
     titleInput.onchange = () => store.renameDocument(titleInput.value);
     titleInput.onkeydown = (e) => { if (e.key === 'Enter') titleInput.blur(); };
@@ -126,15 +132,18 @@ export class StudioChrome {
     this.drawerEl.classList.remove('hidden');
 
     if (store.leftDrawer === 'works') {
-      const itemsHtml = store.docs.map(d => `
+      const itemsHtml = store.docs.map(d => {
+        const badge = getStorageBadgeInfo(d);
+        return `
         <div class="doc-item ${d.id === store.activeDocId ? 'active' : ''}" data-doc-id="${d.id}">
           <div style="min-width:0;flex:1;">
             <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(d.title)}</div>
-            <div style="font-size:11px;color:var(--ui-text-muted);margin-top:2px;">${d.sheets.length} 張畫布 · ${new Date(d.updatedAt).toLocaleDateString()}</div>
+            <div style="font-size:11px;color:var(--ui-text-muted);margin-top:2px;">${badge.icon} ${esc(badge.shortLabel)} · ${d.sheets.length} 張畫布</div>
           </div>
           ${store.docs.length > 1 ? `<button class="btn btn-sm btn-danger" data-del-doc="${d.id}" title="刪除文件">✕</button>` : ''}
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       this.drawerEl.innerHTML = `
         <div class="drawer-header">

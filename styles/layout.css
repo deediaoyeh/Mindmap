@@ -290,7 +290,10 @@ body.zen-mode .zen-hud {
     margin: 0 2px;
   }
   .doc-title-input {
-    width: 100px;
+    width: 92px;
+  }
+  .storage-pill {
+    max-width: 108px;
   }
 }
 @media (max-width: 900px) {

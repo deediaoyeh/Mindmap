@@ -12,8 +12,9 @@ import { getMediaRecord, saveMediaBlob } from './mediaDb.js';
 import { uid } from './schema.js';
 
 const CLIENT_ID_KEY = 'mindflow_gdrive_client_id';
+const DEFAULT_ROOT_FOLDER_KEY = 'mindflow_gdrive_default_root';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const ROOT_FOLDER_NAME = 'MindFlow';
+const DEFAULT_ROOT_FOLDER_NAME = 'MindFlow';
 
 class GoogleDriveService {
   constructor() {
@@ -42,6 +43,23 @@ class GoogleDriveService {
   setClientId(id) {
     localStorage.setItem(CLIENT_ID_KEY, String(id || '').trim());
     this.notify();
+  }
+
+  getDefaultRootFolder() {
+    return localStorage.getItem(DEFAULT_ROOT_FOLDER_KEY) || DEFAULT_ROOT_FOLDER_NAME;
+  }
+
+  setDefaultRootFolder(name) {
+    const clean = String(name || '').trim() || DEFAULT_ROOT_FOLDER_NAME;
+    localStorage.setItem(DEFAULT_ROOT_FOLDER_KEY, clean);
+    this.notify();
+  }
+
+  getDocTargetPathLabel(doc) {
+    const rootName = doc?.driveParentFolderName || this.getDefaultRootFolder();
+    const useSub = doc?.driveUseSubfolder !== false;
+    const subName = doc?.driveSubfolderName || doc?.title || '未命名心智圖';
+    return useSub ? `Google Drive / ${rootName} / ${subName} /` : `Google Drive / ${rootName} /`;
   }
 
   isConnected() {
@@ -149,21 +167,38 @@ class GoogleDriveService {
   }
 
   async ensureDocFolders(doc) {
-    const rootFolder = await this.findOrCreateFolder(ROOT_FOLDER_NAME);
+    const rootName = doc.driveParentFolderName || this.getDefaultRootFolder();
+    const rootFolder = await this.findOrCreateFolder(rootName);
+    const useSubfolder = doc.driveUseSubfolder !== false;
+
     let docFolder = null;
-    if (doc.driveFolderId) {
-      try {
-        docFolder = await this._apiJson(`https://www.googleapis.com/drive/v3/files/${doc.driveFolderId}?fields=id,name,webViewLink,trashed`);
-        if (docFolder.trashed) docFolder = null;
-      } catch {
-        docFolder = null;
+    if (!useSubfolder) {
+      docFolder = rootFolder;
+    } else {
+      if (doc.driveFolderId && doc.driveFolderId !== rootFolder.id) {
+        try {
+          docFolder = await this._apiJson(`https://www.googleapis.com/drive/v3/files/${doc.driveFolderId}?fields=id,name,webViewLink,trashed`);
+          if (docFolder.trashed) docFolder = null;
+        } catch {
+          docFolder = null;
+        }
       }
-    }
-    if (!docFolder) {
-      docFolder = await this.findOrCreateFolder(doc.title || '未命名心智圖', rootFolder.id);
+      if (!docFolder) {
+        const subName = (doc.driveSubfolderName || doc.title || '未命名心智圖').trim();
+        docFolder = await this.findOrCreateFolder(subName, rootFolder.id);
+      }
     }
     const attachFolder = await this.findOrCreateFolder('attachments', docFolder.id);
     return { rootFolder, docFolder, attachFolder };
+  }
+
+  async listSubfoldersInRoot(rootName = this.getDefaultRootFolder()) {
+    const rootFolder = await this.findOrCreateFolder(rootName);
+    const q = `mimeType='application/vnd.google-apps.folder' and '${rootFolder.id}' in parents and name!='attachments' and trashed=false`;
+    const res = await this._apiJson(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,webViewLink)&orderBy=modifiedTime desc`
+    );
+    return res.files || [];
   }
 
   /**
@@ -313,13 +348,30 @@ class GoogleDriveService {
    * List all MindFlow mind map folders/files saved in Google Drive.
    */
   async listSavedMindMaps() {
-    const rootFolder = await this.findOrCreateFolder(ROOT_FOLDER_NAME);
-    const q = `mimeType='application/vnd.google-apps.folder' and '${rootFolder.id}' in parents and trashed=false`;
+    const rootFolder = await this.findOrCreateFolder(this.getDefaultRootFolder());
+    const results = [];
+
+    // 1. Check files saved directly inside root folder (when user opted not to create a subfolder)
+    const rootFq = `'${rootFolder.id}' in parents and name contains '.mindflow.json' and trashed=false`;
+    const rootFiles = await this._apiJson(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(rootFq)}&fields=files(id,name,modifiedTime,size)`
+    );
+    for (const rf of (rootFiles.files || [])) {
+      results.push({
+        folderId: rootFolder.id,
+        folderName: `${rootFolder.name} / ${rf.name.replace(/\.mindflow\.json$/i, '')}`,
+        folderUrl: rootFolder.webViewLink,
+        jsonFileId: rf.id,
+        modifiedTime: rf.modifiedTime
+      });
+    }
+
+    // 2. Check subfolders inside root folder
+    const q = `mimeType='application/vnd.google-apps.folder' and '${rootFolder.id}' in parents and name!='attachments' and trashed=false`;
     const folders = await this._apiJson(
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,webViewLink)&orderBy=modifiedTime desc`
     );
 
-    const results = [];
     for (const f of (folders.files || [])) {
       const fq = `'${f.id}' in parents and name contains '.mindflow.json' and trashed=false`;
       const files = await this._apiJson(

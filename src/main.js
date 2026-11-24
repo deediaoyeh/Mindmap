@@ -5,6 +5,7 @@
  */
 
 import { gdrive } from './core/gdrive.js';
+import { pickAndBindSaveFile, writeDocToHandle } from './core/localFile.js';
 import {
   extractVideoMetadata,
   parseVideoUrl,
@@ -381,6 +382,31 @@ window.addEventListener('keydown', (e) => {
       toggleZen(false);
       return;
     }
+  }
+
+  if (mod && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    const doc = store.getActiveDoc();
+    if (doc.storageLocation?.type === 'local-file') {
+      writeDocToHandle(doc).then((ok) => {
+        if (ok) {
+          store._saveToStorage();
+          store.notify('doc');
+          showToast(`💾 已儲存至 ${doc.storageLocation.fileName}`, 'success');
+        } else {
+          modals.openStorageSettings();
+        }
+      }).catch(() => modals.openStorageSettings());
+    } else {
+      pickAndBindSaveFile(doc).then((res) => {
+        store._saveToStorage();
+        store.notify('doc');
+        showToast(`💾 已儲存至 ${res.fileName}`, 'success');
+      }).catch((err) => {
+        if (err?.name !== 'AbortError') modals.openStorageSettings();
+      });
+    }
+    return;
   }
 
   if (e.altKey && e.key.toLowerCase() === 'n') {
