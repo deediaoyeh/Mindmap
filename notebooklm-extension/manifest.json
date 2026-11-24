@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "MindFlow Bridge for NotebookLM",
+  "version": "1.0.0",
+  "description": "一鍵將 Google NotebookLM (Gemini Notebook) 的心智圖無損匯出到你的 MindFlow 線上心智圖平台（支援讀取收合分支、JSON 與 Markdown）。",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://notebooklm.google.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "MindFlow NotebookLM 匯出橋接器"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://notebooklm.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

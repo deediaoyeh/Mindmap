@@ -1,0 +1,125 @@
+# XMind 平台架構與功能深度觀察報告
+
+> 觀察日期：2026-11-24  
+> 實地查訪網域：`https://xmind.com`、`https://templates.xmind.com`、`https://app.xmind.com`  
+> 涵蓋頁面：首頁、Features、Structure、AI、Project Management、Collaboration、Integration、Download、線上免費心智圖編輯器（`xmind-embed-editor`）、公開分享檢視頁（`app.xmind.com/share/*`）、Templates Gallery 及官方 12 大類（99 篇）User Guide。
+
+---
+
+## 一、平台整體架構（Platform Architecture）
+
+### 1. 多端部署與產品矩陣
+XMind 採用「核心心智圖渲染引擎 + 雲端協作與 AI 服務」的跨平台架構：
+
+| 平台類型 | 支援環境 | 特色與入口 |
+| :--- | :--- | :--- |
+| **桌面端（Desktop）** | macOS (Universal DMG / App Store)、Windows (EXE x64/ARM64 / Store)、Linux (Snap / Flatpak / `.deb` / `.rpm`)、HarmonyOS PC | 預設本地檔案儲存，支援進階離線功能（語音筆記、自訂快速鍵、完整桌面甘特圖等） |
+| **網頁端（Web）** | `https://app.xmind.com/` | 登入後提供雲端工作區、即時多人協作、即時大綱切換；另提供免登入的嵌入式編輯器（`xmind-embed-editor`）與唯讀公開分享檢視頁（`/share/<id>`） |
+| **行動與空間運算端** | iOS / iPadOS、Android、HarmonyOS、visionOS | 支援自訂本機/雲端資料夾與跨裝置同步 |
+
+### 2. 文件與資料模型架構
+- **多畫布（Multi-Sheet）結構**：單一 `.xmind` 檔案為 ZIP 壓縮容器（內含 `content.json`、`metadata.json`、`manifest.json` 與附件資源），可包含多個獨立的 **Sheet（畫布/分頁）**，每個 Sheet 擁有獨立的主題樹、結構版面與配色主題。
+- **工作區層級（Workspace Hierarchy）**：
+  - `My Works`（個人雲端私有空間）
+  - `Team`（組織層級，集中管理成員、空間與檔案權限）
+  - `Space`（依部門、專案或客戶切分的子協作空間，支援細粒度權限控管）
+- **企業安全**：通過 ISO/IEC 27001 與 SOC 2 Type II 認證，支援 SSO 與檔案密碼保護。
+
+### 3. 開放生態與 AI 整合架構
+- **Xmind Agent（AI 引擎）**：整合對話式生成與修改、5 種思考模式的 Brainstorming Hub、從網頁/PDF/文件/YouTube/圖片/手繪/錄音生成心智圖、Grow Ideas（延伸靈感）、AI Explain、Map Refine（重整優化）、AI 任務拆解與 Pitch Video。
+- **開發者與第三方整合**：提供 **Xmind MCP Server**（Streamable HTTP 遠端 MCP）、**Xmind Skill & CLI**（本地 `.xmind` 讀寫驗證）、Chrome Web Clipper、Notion 嵌入、Slack 與 Zoom 整合。
+
+---
+
+## 二、介面佈局與工作區設計（UI & Workspace Layout）
+
+XMind 的編輯器採用高度專注的「單畫布 + 情境式面板」設計：
+
+```
++-------------------------------------------------------------------------+
+| [Logo/選單]   [主題] [子主題] [關聯線] [外框] [概要] [標記] [插入]   [簡報] [ZEN] [分享] [格式面板] |
++-------------------------------------------------------------------------+
+|                                                                         |
+|                      無邊界互動畫布 (Infinite Canvas)                     |
+|           - 支援智慧對齊導線 (Smart Guidelines)                           |
+|           - 選取節點出現「浮動工具列 (Floating Toolbar)」                   |
+|           - 節點旁出現快捷「+ 新增主題」按鈕                               |
+|           - 支援拖曳重組、自由主題、雙擊即時編輯                             |
+|                                                  +-------------------+  |
+|                                                  | 右側格式/樣式面板  |  |
+|                                                  | (情境自動切換)     |  |
+|                                                  | - 畫布: 骨架/配色  |  |
+|                                                  | - 主題: 形狀/文字  |  |
+|                                                  | - 關聯線/外框設定  |  |
+|                                                  +-------------------+  |
++-------------------------------------------------------------------------+
+| [畫布 1] [畫布 2] [+]                       [縮放 100% ▾] [心智圖 | 大綱] |
++-------------------------------------------------------------------------+
+```
+
+---
+
+## 三、核心功能模組盤點（Core Features）
+
+### 1. 十大結構與「混排結構」能力
+XMind 最具代表性的能力是支援 **10 種內建視覺結構**，且允許在**同一張心智圖內為不同分支套用不同結構（Mixed Structures）**：
+1. **心智圖（Mind Map）**：中心輻射雙向平衡，支援分支自由定位。
+2. **邏輯圖（Logic Chart）**：單側水平因果與推理展開。
+3. **括號圖（Brace Map）**：整體到局部的括號拆解。
+4. **組織架構圖（Org Chart）**：由上而下的階層組織樹。
+5. **樹狀圖（Tree Chart）**：緊湊型階層目錄樹。
+6. **時間軸（Timeline）**：水平與垂直時間序列。
+7. **魚骨圖（Fishbone / Ishikawa）**：因果分析圖。
+8. **矩陣圖（Matrix）**：行列交叉比較表。
+9. **樹狀表格（Tree Table）**：結合樹狀邏輯與表格欄位。
+10. **區域（Zone）**：將自由主題群組為可獨立編輯與匯出的焦點區塊。
+
+### 2. 主題與結構標註系統
+- **節點類型**：中心主題（Central Topic）、主主題（Main Topic / `Enter`）、子主題（Subtopic / `Tab`）、父主題（Parent Topic）、自由主題（Floating Topic，雙擊空白處建立）、概要主題（Summary Topic）、標註（Callout）。
+- **結構連接器**：
+  - **關聯線（Relationship）**：連接任意兩節點，具可拖曳控制點、4 種線型、11 種箭頭樣式與線上文字標籤。
+  - **外框（Boundary）**：框選單一或多個分支，9 種框線樣式並支援外框標題。
+  - **概要（Summary）**：大括號彙整多個同層兄弟主題並長出獨立摘要分支。
+- **節點豐富內容（Metadata）**：
+  - **筆記（Note）**：內嵌富文本筆記與「檢視全部筆記」面板。
+  - **標籤（Label）**：逗號分隔分類標籤，顯示於節點下方並支援篩選。
+  - **標記與貼紙（Markers & Stickers）**：優先級、進度、旗標、星號、箭頭及約 500 款插畫貼紙。
+  - **連結與附件**：網頁超連結、內部主題跳轉連結、圖片、數學公式（LaTeX）、音訊筆記與檔案附件。
+  - **待辦與任務（To-Do vs. Task）**：輕量核取方塊（自動向上統計進度環）與完整專案任務（起訖日、工期、負責人、依賴關係、連動甘特圖）。
+  - **自動編號與摺疊（Numbering & Folding）**：階層編號、單節點收合（顯示隱藏子節點數徽章）與全部摺疊/展開。
+
+### 3. 外觀與樣式客製化
+- **骨架（Skeletons）**：54 種結構＋形狀＋分支線條組合。
+- **智慧配色主題（Smart Color Theme）**：自動維持背景與文字對比度的 6 色平衡盤、彩虹分支（Colored Branches）、自訂主題與快速樣式（Quick Style）。
+- **細部樣式**：31 種節點形狀、線條寬度與漸細（Line Taper）、全域字體（含 CJK 支援）、行內部分文字樣式、背景色、自動平衡／緊湊版面。
+
+### 4. 生產力檢視模式
+- **大綱模式（Outliner）**：一鍵在心智圖與階層大綱間即時雙向切換，支援鍵盤縮排、拖曳排序與筆記／任務檢視。
+- **演說模式（Pitch Mode）**：一鍵將心智圖自動轉為簡報投影片，支援深淺主題、不同長寬比與講者檢視。
+- **專注模式（ZEN Mode）**：全螢幕無干擾寫作，內建深淺外觀與「今日專注計時器」。
+- **甘特圖（Gantt Chart）**：將心智圖任務轉為時間軸排程，並可匯出 CSV 與行事曆 `.ics`。
+- **搜尋、取代與主題篩選（Find, Replace & Topic Filtering）**：依關鍵字、標記、標籤或任務狀態隔離顯示節點。
+
+### 5. 匯入、匯出與分享機制
+- **匯入格式**：`.xmind`、Markdown、OPML、FreeMind (`.mm`)、MindManager、MindNode、EdrawMind、Word (`.docx`)、TextBundle。
+- **匯出格式**：
+  - 圖片：PNG / JPEG（1x / 2x / 3x 解析度、透明背景、6 種畫框樣式、依主分支拆分）、無損 SVG。
+  - 文件與大綱：PDF、Markdown、OPML、Word、Excel、PowerPoint、TextBundle。
+  - 任務：Excel / CSV、行事曆 `.ics`。
+- **分享**：公開檢視／可編輯連結、內嵌碼（Embed iframe）、評論與 `@mention`。
+
+---
+
+## 四、自建平台「MindFlow」架構設計與差異化亮點
+
+基於上述 XMind 觀察，我們設計並實作 **MindFlow（心智流）** —— 一個**完全前端驅動、零後端依賴、原生架設於 GitHub Pages** 的完整線上心智圖平台，並針對使用者核心需求打造 **Google NotebookLM（Gemini Notebook）專屬無縫橋接系統**：
+
+| 對照維度 | XMind 核心功能 | MindFlow 實作方案 |
+| :--- | :--- | :--- |
+| **部署與儲存** | 雲端伺服器 + 桌面端 | 純 ES Modules 靜態架構，原生部署 GitHub Pages；多文件管理 + 多畫布（Multi-Sheet）+ LocalStorage 自動儲存 + URL 壓縮分享連結 |
+| **視覺結構** | 10 種結構 + 分支混排 | 8 種核心結構（心智圖、右/左邏輯圖、組織架構圖、樹狀圖、水平時間軸、魚骨圖、括號圖），支援**單分支獨立覆寫混排結構** |
+| **節點與標註** | 關聯線、外框、概要、標註、自由主題 | 全部實作！包含可拖曳控制點關聯線、分支外框、兄弟概要大括號、氣泡標註、雙擊建立自由主題、拖曳重排父子關係 |
+| **豐富內容** | 筆記、標籤、標記、待辦、任務、連結、圖片、編號 | 全部實作！含自動進度滾動統計、優先級/狀態標記、標籤過濾、圖片內嵌與階層自動編號 |
+| **檢視模式** | MindMap / Outliner / Pitch / ZEN / Gantt | **五大模式完整實作**：心智圖畫布（含小地圖）、雙向大綱、一鍵簡報演說、ZEN 專注計時、任務甘特圖 |
+| **匯入與匯出** | XMind / Markdown / OPML / FreeMind / PNG / SVG / CSV / ICS | 零依賴原生瀏覽器 ZIP 引擎支援真正 `.xmind` 讀寫 + PNG (1x/2x/3x/透明/畫框) + SVG + Markdown + OPML + FreeMind + JSON + CSV + ICS + 列印 PDF |
+| **殺手級亮點：NotebookLM 匯入橋接** | 需靠第三方擴充轉存再匯入 | **內建 4 合 1 NotebookLM 匯入中心**：<br>1. 一鍵書籤小工具（自動擷取 D3 `__data__` 含未展開 `_children` 並直達本平台開啟）<br>2. 隨附 Manifest V3 Chrome 擴充套件原始碼<br>3. 原生解析 NotebookLM JSON / SVG 幾何還原 / Markdown / OPML / FreeMind / XMind<br>4. 支援以個人 Gemini API Key 直接 AI 辨識 NotebookLM 原生下載的 `.png` 圖片還原為可編輯心智圖 |

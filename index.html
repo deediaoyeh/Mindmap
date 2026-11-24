@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MindFlow — 線上心智圖平台 & NotebookLM 橋接工具</title>
+  <meta name="description" content="受 XMind 啟發的開源線上心智圖平台：支援 8 種結構混排、多畫布、大綱、演說簡報、ZEN 專注、甘特圖、.xmind 讀寫與 Google NotebookLM 一鍵匯入。" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ccircle cx='32' cy='32' r='8' fill='white'/%3E%3Ccircle cx='14' cy='18' r='5' fill='white' opacity='.9'/%3E%3Ccircle cx='50' cy='18' r='5' fill='white' opacity='.9'/%3E%3Ccircle cx='14' cy='46' r='5' fill='white' opacity='.9'/%3E%3Ccircle cx='50' cy='46' r='5' fill='white' opacity='.9'/%3E%3Cpath d='M25 27 L18 21 M39 27 L46 21 M25 37 L18 43 M39 37 L46 43' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles/tokens.css" />
+  <link rel="stylesheet" href="./styles/layout.css" />
+  <link rel="stylesheet" href="./styles/components.css" />
+</head>
+<body data-ui-theme="light">
+  <div id="app" class="app-shell">
+    <!-- Top Studio Header / Toolbar -->
+    <header id="top-toolbar" class="top-toolbar" role="toolbar" aria-label="主工具列"></header>
+
+    <!-- Main Workspace Area -->
+    <div class="workspace-body">
+      <!-- Left Drawer: My Works / Find & Filter (collapsible) -->
+      <aside id="left-drawer" class="left-drawer hidden" aria-label="側邊抽屜"></aside>
+
+      <!-- Central Stage: MindMap Canvas / Outliner / Gantt -->
+      <main id="stage" class="stage">
+        <!-- SVG MindMap Canvas Viewport -->
+        <div id="canvas-view" class="view-pane active">
+          <svg id="mindmap-svg" class="mindmap-svg" xmlns="http://www.w3.org/2000/svg">
+            <defs id="svg-defs"></defs>
+            <g id="viewport-group">
+              <g id="layer-boundaries"></g>
+              <g id="layer-branches"></g>
+              <g id="layer-summaries"></g>
+              <g id="layer-relationships"></g>
+              <g id="layer-callouts"></g>
+              <g id="layer-nodes"></g>
+              <g id="layer-overlay"></g>
+            </g>
+          </svg>
+
+          <!-- Inline Node Text Editor -->
+          <div id="inline-editor-wrap" class="inline-editor-wrap hidden">
+            <textarea id="inline-editor" class="inline-editor" rows="1" spellcheck="false"></textarea>
+          </div>
+
+          <!-- Floating Contextual Toolbar -->
+          <div id="floating-toolbar" class="floating-toolbar hidden" role="toolbar" aria-label="節點快速工具列"></div>
+
+          <!-- Active Filter / Relationship Mode Banner -->
+          <div id="canvas-banner" class="canvas-banner hidden"></div>
+
+          <!-- Minimap -->
+          <div id="minimap-panel" class="minimap-panel hidden">
+            <svg id="minimap-svg" class="minimap-svg"></svg>
+          </div>
+
+          <!-- ZEN Mode Floating HUD -->
+          <div id="zen-hud" class="zen-hud hidden">
+            <div class="zen-timer-pill">
+              <span class="zen-dot"></span>
+              <span>今日專注</span>
+              <strong id="zen-timer-value">00:00</strong>
+            </div>
+            <button id="zen-theme-btn" class="btn-pill" title="切換 ZEN 深淺外觀">外觀</button>
+            <button id="zen-exit-btn" class="btn-pill btn-primary" title="離開 ZEN 專注模式 (Esc)">離開 ZEN</button>
+          </div>
+        </div>
+
+        <!-- Outliner View -->
+        <div id="outliner-view" class="view-pane"></div>
+
+        <!-- Gantt Chart View -->
+        <div id="gantt-view" class="view-pane"></div>
+      </main>
+
+      <!-- Right Inspector Panel (Map & Topic Styling) -->
+      <aside id="inspector-panel" class="inspector-panel" aria-label="格式與樣式面板"></aside>
+    </div>
+
+    <!-- Bottom Bar: Multi-Sheet Tabs + Zoom & View Mode Switcher -->
+    <footer id="bottom-bar" class="bottom-bar"></footer>
+  </div>
+
+  <!-- Pitch / Presentation Mode Fullscreen Overlay -->
+  <div id="pitch-overlay" class="pitch-overlay hidden" role="dialog" aria-modal="true" aria-label="演說簡報模式"></div>
+
+  <!-- Modal Root -->
+  <div id="modal-root" class="modal-root hidden" role="dialog" aria-modal="true"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Hidden File Input for Quick Imports -->
+  <input id="global-file-input" type="file" class="hidden" accept=".json,.md,.markdown,.opml,.mm,.xmind,.svg,.txt,.canvas" />
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

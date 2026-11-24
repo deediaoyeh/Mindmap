@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { width: 310px; margin: 0; padding: 14px; font-family: Inter, "Noto Sans TC", sans-serif; font-size: 13px; color: #0f172a; background: #f8fafc; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    label { display: block; font-size: 11.5px; color: #475569; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: 10px; font-size: 12px; }
+    button { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; font-weight: 600; cursor: pointer; margin-bottom: 7px; }
+    .primary { background: linear-gradient(135deg, #4285f4, #9b72cb, #d96570); color: #fff; border: none; }
+    #status { font-size: 12px; color: #475569; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <h3>✨ MindFlow Bridge</h3>
+  <label for="url-input">你的 MindFlow 平台網址（GitHub Pages）</label>
+  <input id="url-input" type="url" placeholder="https://<username>.github.io/<repo>/" />
+  <button class="primary" id="btn-open">一鍵匯出到 MindFlow 編輯</button>
+  <button id="btn-json">下載 NotebookLM JSON 檔</button>
+  <button id="btn-md">複製為 Markdown 大綱</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
