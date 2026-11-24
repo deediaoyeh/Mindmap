@@ -39,7 +39,7 @@ const inspector = new InspectorPanel(document.getElementById('inspector-panel'),
 
 canvas.onOpenVideo = (node) => modals.openVideoPlayer(node);
 canvas.onOpenImage = (node) => modals.openImageLightbox(node);
-canvas.onOpenAttachments = (node) => modals.openAttachmentsModal(node);
+canvas.onOpenAttachments = (node, tab = 'local') => modals.openAttachmentsModal(node, tab);
 gdrive.subscribe(() => syncViews('ui'));
 
 // ZEN Mode + Focus Timer

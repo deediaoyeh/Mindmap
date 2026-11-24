@@ -13,8 +13,17 @@ import {
   supportsFileSystemPicker,
   writeDocToHandle
 } from '../core/localFile.js';
-import { formatBytes, getMediaObjectUrl } from '../core/mediaDb.js';
-import { createNode, createSheet, TEMPLATES } from '../core/schema.js';
+import {
+  deleteMediaBlob,
+  extractGoogleDriveFileId,
+  extractVideoMetadata,
+  formatBytes,
+  getMediaObjectUrl,
+  parseVideoUrl,
+  readImageAsDataUrl,
+  saveMediaBlob
+} from '../core/mediaDb.js';
+import { createNode, createSheet, TEMPLATES, uid } from '../core/schema.js';
 import { store } from '../core/store.js';
 import { STRUCTURES, THEMES } from '../render/themes.js';
 import {
@@ -1213,58 +1222,393 @@ export class ModalManager {
   }
 
   // =========================================================================
-  // 8. Node Attachments Viewer Modal
+  // 8. Node Batch Add Files & Links + Attachments Manager Modal
   // =========================================================================
-  openAttachmentsModal(node) {
+  openAttachmentsModal(node, initialTab = 'local') {
     if (!node) return;
-    store.selectNode(node.id);
-    const list = node.attachments || [];
+    const nodeId = node.id;
+    store.selectNode(nodeId);
+
+    const freshNode = () => store.findNode(nodeId) || node;
+    const existingList = freshNode().attachments || [];
+    const activeTab = initialTab;
+
     this._open(`
       <div class="modal-header">
-        <h3>📎 附加檔案 · ${esc(node.title)} (${list.length})</h3>
+        <h3>📎 批次新增檔案與連結 · ${esc(freshNode().title)}</h3>
         <button class="btn btn-sm" data-close-modal>✕</button>
       </div>
-      <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;">
-        ${list.map((att, idx) => `
-          <div class="att-item">
-            <div style="flex:1;min-width:0;">
-              <div style="font-weight:600;">${att.driveFileId ? '☁️ ' : '📄 '}${esc(att.name)}</div>
-              <div style="font-size:11.5px;color:var(--ui-text-muted);">
-                ${att.size ? formatBytes(att.size) : '雲端 / 外部連結'}${att.driveFileId ? ' · 已同步至 Google Drive' : ' · 本機 IndexedDB'}
-              </div>
-            </div>
-            <button class="btn btn-sm btn-primary" data-modal-open-att="${idx}">下載 / 開啟</button>
-          </div>
-        `).join('') || `<div style="padding:24px;text-align:center;color:var(--ui-text-muted);">此節點尚無附加檔案，請於右側主題面板上傳！</div>`}
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="att-modal-gdrive-btn">☁️ 同步至 Google Drive</button>
-        <button class="btn btn-primary" data-close-modal>完成</button>
+      <div class="modal-body">
+        <div class="modal-tabs">
+          <button class="modal-tab ${activeTab === 'local' ? 'active' : ''}" data-atab="local">💻 從本機批次上傳</button>
+          <button class="modal-tab ${activeTab === 'links' ? 'active' : ''}" data-atab="links">🔗 批次加入連結</button>
+          <button class="modal-tab ${activeTab === 'list' ? 'active' : ''}" data-atab="list">📂 已附加檔案 (${existingList.length})</button>
+        </div>
+        <div id="att-modal-tab-body"></div>
       </div>
     `);
 
-    this.root.querySelector('#att-modal-gdrive-btn').onclick = () => this.openGoogleDrive();
-    this.root.querySelectorAll('[data-modal-open-att]').forEach(btn => {
-      btn.onclick = async () => {
-        const att = list[Number(btn.dataset.modalOpenAtt)];
-        if (!att) return;
-        if (att.localBlobId) {
-          const objUrl = await getMediaObjectUrl(att.localBlobId);
-          if (objUrl) {
-            const a = document.createElement('a');
-            a.href = objUrl;
-            a.download = att.name;
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
+    const pendingFiles = [];
+
+    const renderTab = (tab) => {
+      const curNode = freshNode();
+      const curList = curNode.attachments || [];
+      this.root.querySelectorAll('[data-atab]').forEach(b => {
+        b.classList.toggle('active', b.dataset.atab === tab);
+        if (b.dataset.atab === 'list') b.textContent = `📂 已附加檔案 (${curList.length})`;
+      });
+      const body = this.root.querySelector('#att-modal-tab-body');
+
+      if (tab === 'local') {
+        const renderQueue = () => {
+          const qEl = body.querySelector('#batch-file-queue');
+          const addBtn = body.querySelector('#batch-local-commit-btn');
+          if (!qEl || !addBtn) return;
+          addBtn.disabled = pendingFiles.length === 0;
+          addBtn.textContent = pendingFiles.length > 0
+            ? `＋ 批次加入這 ${pendingFiles.length} 個檔案`
+            : '＋ 確認批次加入';
+
+          if (!pendingFiles.length) {
+            qEl.innerHTML = `<div style="font-size:12px;color:var(--ui-text-muted);text-align:center;padding:8px 0;">尚未選取檔案，可按住 Cmd/Ctrl 或 Shift 一次多選，或直接拖曳多個檔案進來</div>`;
             return;
           }
-        }
-        if (att.driveWebViewLink || att.url) {
-          window.open(att.driveWebViewLink || att.url, '_blank', 'noopener');
-        } else if (att.driveFileId) {
-          window.open(`https://drive.google.com/file/d/${att.driveFileId}/view`, '_blank', 'noopener');
-        }
-      };
+          qEl.innerHTML = pendingFiles.map((f, i) => `
+            <div class="att-item">
+              <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  ${f.type.startsWith('image/') ? '🖼️ ' : f.type.startsWith('video/') ? '🎬 ' : '📄 '}${esc(f.name)}
+                </div>
+                <div style="font-size:11px;color:var(--ui-text-muted);">${formatBytes(f.size)} · ${esc(f.type || '一般檔案')}</div>
+              </div>
+              <button class="btn btn-sm btn-danger" data-rm-pending="${i}" title="移除">✕</button>
+            </div>
+          `).join('');
+          qEl.querySelectorAll('[data-rm-pending]').forEach(btn => {
+            btn.onclick = () => {
+              pendingFiles.splice(Number(btn.dataset.rmPending), 1);
+              renderQueue();
+            };
+          });
+        };
+
+        body.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div class="dropzone" id="batch-local-dropzone">
+              <div style="font-size:24px;margin-bottom:4px;">📂</div>
+              <div style="font-weight:700;">點擊選取多個本機檔案，或直接拖曳多檔到此處</div>
+              <div style="font-size:12px;color:var(--ui-text-muted);margin-top:4px;">
+                支援 PDF、Word、Excel、PPT、圖片、影片（自動縮圖＋播放）、音訊、ZIP 等任意格式，可重複追加！
+              </div>
+              <input type="file" id="batch-local-input" multiple class="hidden" />
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:8px;background:var(--ui-surface-2);border:1px solid var(--ui-border);">
+              <div style="font-size:12px;font-weight:700;">加入方式</div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+                <input type="radio" name="batch-local-mode" value="attach" checked />
+                <span>全部附加到目前節點「<b>${esc(curNode.title)}</b>」（圖片／影片會順便呈現預覽縮圖）</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+                <input type="radio" name="batch-local-mode" value="children" />
+                <span>每個檔案各自建立一個新的子主題（大量檔案批次整理超方便）</span>
+              </label>
+            </div>
+
+            <div id="batch-file-queue" style="display:flex;flex-direction:column;gap:6px;max-height:190px;overflow-y:auto;"></div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:6px;border-top:1px solid var(--ui-border);">
+              <span style="font-size:11.5px;color:var(--ui-text-muted);">
+                ${gdrive.isConnected() ? '☁️ 已連線 Google Drive，加入後自動同步雲端' : '💾 檔案將安全存於本機 IndexedDB，並可隨時同步至 Google Drive'}
+              </span>
+              <div style="display:flex;gap:8px;">
+                <button class="btn" data-close-modal>取消</button>
+                <button class="btn btn-primary" id="batch-local-commit-btn" disabled>＋ 確認批次加入</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        body.querySelectorAll('[data-close-modal]').forEach(b => { b.onclick = () => this.close(); });
+        const dz = body.querySelector('#batch-local-dropzone');
+        const fi = body.querySelector('#batch-local-input');
+        const enqueue = (fileList) => {
+          for (const f of Array.from(fileList || [])) pendingFiles.push(f);
+          renderQueue();
+        };
+        dz.onclick = () => fi.click();
+        fi.onchange = () => { enqueue(fi.files); fi.value = ''; };
+        dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('dragover'); };
+        dz.ondragleave = () => dz.classList.remove('dragover');
+        dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('dragover'); enqueue(e.dataTransfer.files); };
+
+        renderQueue();
+
+        body.querySelector('#batch-local-commit-btn').onclick = async () => {
+          const btn = body.querySelector('#batch-local-commit-btn');
+          const mode = body.querySelector('input[name="batch-local-mode"]:checked')?.value || 'attach';
+          btn.disabled = true;
+          btn.textContent = '⏳ 正在處理與儲存檔案...';
+
+          const doc = store.getActiveDoc();
+          const addedAtts = [];
+          let addedCount = 0;
+
+          for (const file of pendingFiles) {
+            const baseName = file.name.replace(/\.[^.]+$/, '') || file.name;
+            let targetId = nodeId;
+            if (mode === 'children') {
+              const child = store.addChild(nodeId, baseName, false);
+              if (child) targetId = child.id;
+            }
+            const tNode = store.findNode(targetId);
+            if (!tNode) continue;
+
+            if (file.type.startsWith('image/') && !tNode.image) {
+              try {
+                const dataUrl = await readImageAsDataUrl(file, 960);
+                store.updateNode(targetId, { image: dataUrl });
+              } catch {}
+            } else if (file.type.startsWith('video/') && !tNode.video) {
+              const vBlobId = uid('vid');
+              await saveMediaBlob(vBlobId, file, { name: file.name, mimeType: file.type });
+              const meta = await extractVideoMetadata(file);
+              const vObj = {
+                sourceType: 'local',
+                name: file.name,
+                mimeType: file.type || 'video/mp4',
+                size: file.size,
+                localBlobId: vBlobId,
+                thumbnail: meta.thumbnail,
+                duration: meta.duration
+              };
+              if (gdrive.isConnected()) {
+                try {
+                  const up = await gdrive.uploadNodeMedia(doc, file);
+                  vObj.driveFileId = up.driveFileId;
+                  vObj.driveWebViewLink = up.driveWebViewLink;
+                  vObj.embedUrl = `https://drive.google.com/file/d/${up.driveFileId}/preview`;
+                } catch {}
+              }
+              store.updateNode(targetId, { video: vObj });
+              addedCount++;
+              continue;
+            }
+
+            // Always store full file blob as attachment so original file is downloadable
+            const blobId = uid('att');
+            await saveMediaBlob(blobId, file, { name: file.name, mimeType: file.type });
+            const att = {
+              id: uid('f'),
+              name: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              size: file.size,
+              localBlobId: blobId,
+              uploadedAt: new Date().toISOString()
+            };
+            if (gdrive.isConnected()) {
+              try {
+                const up = await gdrive.uploadNodeMedia(doc, file);
+                att.driveFileId = up.driveFileId;
+                att.driveWebViewLink = up.driveWebViewLink;
+              } catch {}
+            }
+            if (mode === 'children') {
+              store.updateNode(targetId, { attachments: [...(tNode.attachments || []), att] });
+            } else {
+              addedAtts.push(att);
+            }
+            addedCount++;
+          }
+
+          if (addedAtts.length > 0) {
+            const latest = freshNode();
+            store.updateNode(nodeId, { attachments: [...(latest.attachments || []), ...addedAtts] });
+          }
+
+          pendingFiles.length = 0;
+          showToast(`✅ 已批次加入 ${addedCount} 個本機檔案！`, 'success');
+          renderTab('list');
+        };
+      } else if (tab === 'links') {
+        body.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div style="font-size:12.5px;color:var(--ui-text-secondary);line-height:1.55;">
+              一次可貼上<b>多個連結（每行一個）</b>，支援 Google Drive 檔案連結、YouTube 影片連結、圖片網址或任意網頁資源。<br/>
+              可自訂顯示名稱：<code>名稱 | https://...</code>，或直接貼網址（自動擷取名稱）。
+            </div>
+
+            <textarea id="batch-links-textarea" class="ui-textarea" style="min-height:140px;font-family:var(--font-mono);font-size:12px;" placeholder="範例（每行一個）：
+專案簡報 | https://drive.google.com/file/d/xxxx/view
+教學影片 | https://www.youtube.com/watch?v=dQw4w9WgXcQ
+https://example.com/report.pdf"></textarea>
+
+            <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:8px;background:var(--ui-surface-2);border:1px solid var(--ui-border);">
+              <div style="font-size:12px;font-weight:700;">加入方式</div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+                <input type="radio" name="batch-link-mode" value="attach" checked />
+                <span>全部加入為目前節點「<b>${esc(curNode.title)}</b>」的附加檔案連結</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+                <input type="radio" name="batch-link-mode" value="children" />
+                <span>每個連結各自建立一個新的子主題（影片連結會自動產生縮圖＋播放按鈕！）</span>
+              </label>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:6px;border-top:1px solid var(--ui-border);">
+              <button class="btn" data-close-modal>取消</button>
+              <button class="btn btn-primary" id="batch-links-commit-btn">＋ 批次加入連結</button>
+            </div>
+          </div>
+        `;
+
+        body.querySelectorAll('[data-close-modal]').forEach(b => { b.onclick = () => this.close(); });
+        body.querySelector('#batch-links-commit-btn').onclick = () => {
+          const raw = body.querySelector('#batch-links-textarea').value || '';
+          const mode = body.querySelector('input[name="batch-link-mode"]:checked')?.value || 'attach';
+          const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (!lines.length) return showToast('請先輸入至少一個連結', 'error');
+
+          const parsedEntries = [];
+          for (const line of lines) {
+            let customName = '';
+            let url = line;
+            if (line.includes('|')) {
+              const parts = line.split('|');
+              customName = parts[0].trim();
+              url = parts.slice(1).join('|').trim();
+            }
+            if (!/^https?:\/\//i.test(url)) continue;
+            const gdId = extractGoogleDriveFileId(url);
+            let autoName = customName;
+            if (!autoName) {
+              try {
+                const u = new URL(url);
+                const seg = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+                autoName = gdId ? 'Google Drive 檔案' : (seg && seg.length < 48 ? seg : u.hostname);
+              } catch {
+                autoName = '外部連結檔案';
+              }
+            }
+            parsedEntries.push({ name: autoName, url, gdId });
+          }
+
+          if (!parsedEntries.length) {
+            return showToast('未偵測到有效的 http:// 或 https:// 連結', 'error');
+          }
+
+          if (mode === 'children') {
+            for (const item of parsedEntries) {
+              const child = store.addChild(nodeId, item.name, false);
+              if (!child) continue;
+              const pv = parseVideoUrl(item.url);
+              const isVid = pv && (pv.sourceType === 'youtube' || /\.(mp4|webm|mov)(\?.*)?$/i.test(item.url));
+              const isImg = /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(item.url);
+              const att = {
+                id: uid('f'),
+                name: item.name,
+                mimeType: 'text/uri-list',
+                size: 0,
+                url: item.url,
+                driveFileId: item.gdId || '',
+                driveWebViewLink: item.gdId ? item.url : '',
+                uploadedAt: new Date().toISOString()
+              };
+              const patch = { link: item.url, attachments: [att] };
+              if (isVid) patch.video = { ...pv, title: item.name };
+              else if (isImg) patch.image = item.url;
+              store.updateNode(child.id, patch);
+            }
+            showToast(`✅ 已批次建立 ${parsedEntries.length} 個連結子主題！`, 'success');
+            this.close();
+          } else {
+            const newAtts = parsedEntries.map(item => ({
+              id: uid('f'),
+              name: item.name,
+              mimeType: 'text/uri-list',
+              size: 0,
+              url: item.url,
+              driveFileId: item.gdId || '',
+              driveWebViewLink: item.gdId ? item.url : '',
+              uploadedAt: new Date().toISOString()
+            }));
+            const latest = freshNode();
+            store.updateNode(nodeId, { attachments: [...(latest.attachments || []), ...newAtts] });
+            showToast(`✅ 已批次加入 ${newAtts.length} 個連結檔案！`, 'success');
+            renderTab('list');
+          }
+        };
+      } else {
+        body.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            ${curList.map((att, idx) => `
+              <div class="att-item">
+                <div style="flex:1;min-width:0;">
+                  <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(att.name)}">
+                    ${att.driveFileId ? '☁️ ' : att.url ? '🔗 ' : '📄 '}${esc(att.name)}
+                  </div>
+                  <div style="font-size:11.5px;color:var(--ui-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ${att.size ? formatBytes(att.size) : (att.url || '雲端連結')}${att.driveFileId ? ' · Google Drive' : att.localBlobId ? ' · 本機 IndexedDB' : ''}
+                  </div>
+                </div>
+                <button class="btn btn-sm btn-primary" data-modal-open-att="${idx}">開啟 / 下載</button>
+                <button class="btn btn-sm btn-danger" data-modal-del-att="${idx}" title="刪除">✕</button>
+              </div>
+            `).join('') || `<div style="padding:24px;text-align:center;color:var(--ui-text-muted);">此節點尚無附加檔案，可切換到「💻 從本機批次上傳」或「🔗 批次加入連結」快速加入！</div>`}
+
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--ui-border);">
+              <button class="btn btn-sm" id="att-modal-gdrive-btn">☁️ 同步至 Google Drive</button>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-sm" id="att-goto-local">＋ 繼續新增本機檔案</button>
+                <button class="btn btn-primary btn-sm" data-close-modal>完成</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        body.querySelectorAll('[data-close-modal]').forEach(b => { b.onclick = () => this.close(); });
+        body.querySelector('#att-modal-gdrive-btn').onclick = () => this.openGoogleDrive();
+        body.querySelector('#att-goto-local').onclick = () => renderTab('local');
+
+        body.querySelectorAll('[data-modal-open-att]').forEach(btn => {
+          btn.onclick = async () => {
+            const att = curList[Number(btn.dataset.modalOpenAtt)];
+            if (!att) return;
+            if (att.localBlobId) {
+              const objUrl = await getMediaObjectUrl(att.localBlobId);
+              if (objUrl) {
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = att.name;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
+                return;
+              }
+            }
+            if (att.driveWebViewLink || att.url) {
+              window.open(att.driveWebViewLink || att.url, '_blank', 'noopener');
+            } else if (att.driveFileId) {
+              window.open(`https://drive.google.com/file/d/${att.driveFileId}/view`, '_blank', 'noopener');
+            }
+          };
+        });
+
+        body.querySelectorAll('[data-modal-del-att]').forEach(btn => {
+          btn.onclick = () => {
+            const idx = Number(btn.dataset.modalDelAtt);
+            const target = curList[idx];
+            if (target?.localBlobId) deleteMediaBlob(target.localBlobId).catch(() => {});
+            const next = curList.filter((_, i) => i !== idx);
+            store.updateNode(nodeId, { attachments: next });
+            renderTab('list');
+          };
+        });
+      }
+    };
+
+    this.root.querySelectorAll('[data-atab]').forEach(btn => {
+      btn.onclick = () => renderTab(btn.dataset.atab);
     });
+    renderTab(activeTab);
   }
 }

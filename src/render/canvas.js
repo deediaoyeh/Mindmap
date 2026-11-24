@@ -842,6 +842,7 @@ export class MindMapCanvas {
     this.floatingToolbar.innerHTML = `
       <button class="ft-btn" data-ft="child" title="新增子主題 (Tab)">＋子主題</button>
       <button class="ft-btn" data-ft="sibling" title="新增同層主題 (Enter)">＋同層</button>
+      <button class="ft-btn" data-ft="files" title="從本機或連結批次新增檔案">📎檔案</button>
       <button class="ft-btn" data-ft="rel" title="建立關聯線">↗關聯</button>
       <button class="ft-btn" data-ft="boundary" title="外框">▢外框</button>
       <button class="ft-btn" data-ft="summary" title="概要">｝概要</button>
@@ -944,6 +945,10 @@ export class MindMapCanvas {
       const id = store.selectedNodeId;
       if (act === 'child') store.addChild(id);
       else if (act === 'sibling') store.addSibling(id);
+      else if (act === 'files') {
+        const node = store.findNode(id);
+        if (node && this.onOpenAttachments) this.onOpenAttachments(node);
+      }
       else if (act === 'rel') store.setConnectingMode(id);
       else if (act === 'boundary') store.toggleBoundary(id);
       else if (act === 'summary') store.toggleSummary(id);
@@ -1006,7 +1011,7 @@ export class MindMapCanvas {
       if (attBtn) {
         e.stopPropagation();
         const node = store.findNode(attBtn.dataset.attNode);
-        if (node && this.onOpenAttachments) this.onOpenAttachments(node);
+        if (node && this.onOpenAttachments) this.onOpenAttachments(node, 'list');
         return;
       }
 
