@@ -83,19 +83,25 @@ function measureNodeBox(node, depth, visual, numberingPrefix = '') {
 
   const markerW = (node.markers?.length || 0) * 21;
   const todoW = node.todo ? 22 : 0;
+  const attCount = (node.attachments || []).length;
   const badgeCount = (node.notes ? 1 : 0) + (node.link ? 1 : 0) + (node.task ? 1 : 0);
-  const badgeW = badgeCount > 0 ? badgeCount * 20 + 10 : 0;
+  const attBadgeW = attCount > 0 ? 38 : 0;
+  const badgeW = (badgeCount > 0 ? badgeCount * 20 + 10 : 0) + attBadgeW;
 
   const padX = depth === 0 ? 22 : depth === 1 ? 16 : 12;
   const padY = depth === 0 ? 13 : depth === 1 ? 9 : 7;
 
   const contentW = Math.max(52, todoW + markerW + maxLineW + badgeW);
   const imgH = node.image ? 96 : 0;
-  const imgW = node.image ? 148 : 0;
+  const imgW = node.image ? 156 : 0;
+  const videoH = node.video ? 104 : 0;
+  const videoW = node.video ? 172 : 0;
+  const mediaH = imgH + videoH;
+  const mediaW = Math.max(imgW, videoW);
   const labelsH = (node.labels && node.labels.length > 0) ? 22 : 0;
 
-  let width = Math.ceil(Math.max(contentW, imgW) + padX * 2);
-  let height = Math.ceil(lines.length * lineHeight + padY * 2 + imgH + labelsH);
+  let width = Math.ceil(Math.max(contentW, mediaW) + padX * 2);
+  let height = Math.ceil(lines.length * lineHeight + padY * 2 + mediaH + labelsH);
 
   if (visual.shape === 'diamond') {
     width = Math.ceil(width * 1.28);
@@ -104,7 +110,7 @@ function measureNodeBox(node, depth, visual, numberingPrefix = '') {
     width = Math.ceil(width + 20);
   }
 
-  return { width, height, lines, lineHeight, padX, padY, displayTitle, imgH, labelsH };
+  return { width, height, lines, lineHeight, padX, padY, displayTitle, imgH, videoH, labelsH };
 }
 
 /**

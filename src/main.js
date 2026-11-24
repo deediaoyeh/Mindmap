@@ -4,6 +4,7 @@
  * global keyboard shortcuts, global file drag-and-drop, and URL hash importers (#notebooklm= / #map=).
  */
 
+import { gdrive } from './core/gdrive.js';
 import { store } from './core/store.js';
 import { decompressStringFromUrl } from './core/zip.js';
 import { importFromFile } from './importers/formats.js';
@@ -26,7 +27,12 @@ const outliner = new OutlinerView(document.getElementById('outliner-view'));
 const gantt = new GanttView(document.getElementById('gantt-view'));
 const pitch = new PitchView(document.getElementById('pitch-overlay'));
 const modals = new ModalManager(canvas);
-const inspector = new InspectorPanel(document.getElementById('inspector-panel'));
+const inspector = new InspectorPanel(document.getElementById('inspector-panel'), modals);
+
+canvas.onOpenVideo = (node) => modals.openVideoPlayer(node);
+canvas.onOpenImage = (node) => modals.openImageLightbox(node);
+canvas.onOpenAttachments = (node) => modals.openAttachmentsModal(node);
+gdrive.subscribe(() => syncViews('ui'));
 
 // ZEN Mode + Focus Timer
 let zenSeconds = 0;

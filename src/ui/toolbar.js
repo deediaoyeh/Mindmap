@@ -2,6 +2,7 @@
  * Top Toolbar, Left Drawer (My Works + Find/Replace/Filter), and Bottom Bar (Multi-Sheet + Zoom + Views).
  */
 
+import { gdrive } from '../core/gdrive.js';
 import { store } from '../core/store.js';
 import { MARKER_GROUPS } from '../render/themes.js';
 import { showToast } from './toast.js';
@@ -67,6 +68,10 @@ export class StudioChrome {
         <button class="tb-btn" id="tb-callout" title="新增 / 移除標註" ${hasSel ? '' : 'disabled'}>💬<span class="tb-label-md">標註</span></button>
         <div class="tb-divider"></div>
         <button class="tb-btn tb-btn-nlm" id="tb-nlm-btn" title="從 Google NotebookLM / Gemini Notebook 匯入心智圖">✨ NotebookLM<span class="tb-label-md"> 匯入</span></button>
+        <button class="tb-btn ${gdrive.isConnected() ? 'active' : ''}" id="tb-gdrive-btn" title="Google 雲端硬碟同步（存放心智圖原檔與節點附件／影片）">
+          <span class="gdrive-status-dot ${gdrive.isConnected() ? 'connected' : 'offline'}"></span>
+          ☁️<span class="tb-label-md">雲端硬碟</span>
+        </button>
         <button class="tb-btn" id="tb-templates-btn" title="範本庫">📑<span class="tb-label-md">範本</span></button>
       </div>
 
@@ -100,6 +105,7 @@ export class StudioChrome {
     this.toolbarEl.querySelector('#tb-callout').onclick = () => store.toggleCallout();
 
     this.toolbarEl.querySelector('#tb-nlm-btn').onclick = () => this.modals.openNotebookLM();
+    this.toolbarEl.querySelector('#tb-gdrive-btn').onclick = () => this.modals.openGoogleDrive();
     this.toolbarEl.querySelector('#tb-templates-btn').onclick = () => this.modals.openTemplates();
     this.toolbarEl.querySelector('#tb-search-btn').onclick = () => store.toggleLeftDrawer('search');
     this.toolbarEl.querySelector('#tb-pitch-btn').onclick = () => this.pitch.start();

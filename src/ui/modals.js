@@ -6,10 +6,14 @@
  *  4. Keyboard Shortcuts Cheat Sheet
  */
 
+import { gdrive } from '../core/gdrive.js';
+import { formatBytes, getMediaObjectUrl } from '../core/mediaDb.js';
 import { TEMPLATES } from '../core/schema.js';
 import { store } from '../core/store.js';
 import {
+  buildXMindBlob,
   exportFreeMind,
+  exportFullBundleZip,
   exportJSON,
   exportMarkdown,
   exportOPML,
@@ -394,6 +398,7 @@ export class ModalManager {
           <div style="font-weight:700;margin-bottom:8px;">📦 心智圖與文件格式</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-primary" id="exp-xmind-btn">匯出原生 .xmind</button>
+            <button class="btn btn-primary" id="exp-bundle-btn" title="包含原始心智圖檔 + attachments 資料夾內所有附件與影片">☁️ 完整套件 (.zip 含所有附件)</button>
             <button class="btn" id="exp-md-btn">Markdown (.md)</button>
             <button class="btn" id="exp-opml-btn">OPML (.opml)</button>
             <button class="btn" id="exp-mm-btn">FreeMind (.mm)</button>
@@ -439,6 +444,11 @@ export class ModalManager {
     this.root.querySelector('#exp-xmind-btn').onclick = async () => {
       await exportXMind();
       showToast('已匯出標準 .xmind 檔案（可直接於 XMind 開啟）', 'success');
+    };
+    this.root.querySelector('#exp-bundle-btn').onclick = async () => {
+      showToast('正在打包原檔與所有附加檔案...');
+      await exportFullBundleZip();
+      showToast('已匯出完整套件 ZIP（含原檔 + attachments/）', 'success');
     };
     this.root.querySelector('#exp-md-btn').onclick = () => { exportMarkdown(); showToast('已匯出 Markdown', 'success'); };
     this.root.querySelector('#exp-opml-btn').onclick = () => { exportOPML(); showToast('已匯出 OPML', 'success'); };
@@ -492,5 +502,315 @@ export class ModalManager {
         </table>
       </div>
     `);
+  }
+
+  // =========================================================================
+  // 5. Google Drive Cloud Storage & Sync Center
+  // =========================================================================
+  openGoogleDrive() {
+    const doc = store.getActiveDoc();
+    const connected = gdrive.isConnected();
+    const clientId = gdrive.getClientId();
+    const origin = window.location.origin;
+
+    this._open(`
+      <div class="modal-header">
+        <h3>☁️ Google 雲端硬碟整合中心</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="nlm-hero" style="margin-bottom:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;">
+                <span class="gdrive-status-dot ${connected ? 'connected' : 'offline'}"></span>
+                ${connected ? `已連線：${esc(gdrive.userInfo?.displayName || 'Google Drive')} (${esc(gdrive.userInfo?.emailAddress || '')})` : '尚未連線至 Google 雲端硬碟'}
+              </div>
+              <div style="font-size:12px;color:var(--ui-text-secondary);margin-top:4px;">
+                雲端自動結構：<code>Google Drive / MindFlow / &lt;心智圖名稱&gt; /</code>（同時存放原始 <code>.mindflow.json</code>、<code>.xmind</code> 與 <code>attachments/</code> 內所有節點附件與影片）
+              </div>
+            </div>
+            ${connected ? `<button class="btn btn-sm btn-danger" id="gd-disconnect-btn">中斷連線</button>` : ''}
+          </div>
+        </div>
+
+        <div style="padding:14px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:8px;">
+          <div style="font-weight:700;font-size:13px;">🔑 連線設定（純前端 OAuth 2.0，僅存取本應用建立的檔案）</div>
+          <div style="display:flex;gap:8px;">
+            <input id="gd-client-id" class="ui-input" value="${esc(clientId)}" placeholder="貼上您的 Google OAuth Client ID (xxxx.apps.googleusercontent.com)" />
+            <button class="btn btn-primary" id="gd-connect-btn" style="white-space:nowrap;">${connected ? '重新授權' : '連結 Google 帳號'}</button>
+          </div>
+          <details style="font-size:12px;color:var(--ui-text-secondary);line-height:1.6;">
+            <summary style="cursor:pointer;font-weight:600;color:var(--accent);">如何取得自己的 Google OAuth Client ID（1 分鐘免費設定）？</summary>
+            <ol style="margin:6px 0 0;padding-left:20px;">
+              <li>前往 <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener" style="color:var(--accent);">Google Cloud Console</a> 啟用 <b>Google Drive API</b>。</li>
+              <li>在 <b>憑證 → 建立憑證 → OAuth 用戶端 ID</b> 選擇「<b>網頁應用程式</b>」。</li>
+              <li>在「已授權的 JavaScript 來源」填入目前網址來源：<code>${esc(origin)}</code></li>
+              <li>複製產生的 Client ID 貼到上方欄位，按「連結 Google 帳號」即可！</li>
+            </ol>
+          </details>
+        </div>
+
+        <div style="padding:14px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:700;font-size:13.5px;">目前心智圖：${esc(doc.title)}</div>
+              <div id="gd-sync-status" style="font-size:12px;color:var(--ui-text-muted);margin-top:2px;">
+                ${doc.driveLastSyncedAt ? `上次雲端同步：${new Date(doc.driveLastSyncedAt).toLocaleString()}` : '尚未同步到 Google Drive'}
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              ${doc.driveFolderUrl ? `<a class="btn btn-sm" href="${esc(doc.driveFolderUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">📂 開啟雲端資料夾</a>` : ''}
+              <button class="btn btn-primary" id="gd-sync-now-btn" ${connected ? '' : 'disabled'}>☁️ 立即同步原檔＋附件</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:14px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <strong style="font-size:13px;">📂 雲端已儲存的心智圖</strong>
+            <button class="btn btn-sm" id="gd-refresh-list-btn" ${connected ? '' : 'disabled'}>重新整理清單</button>
+          </div>
+          <div id="gd-cloud-list" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ui-text-muted);">
+            ${connected ? '點擊「重新整理清單」載入您的 MindFlow 雲端資料夾...' : '連線 Google 帳號後即可瀏覽並開啟雲端心智圖。'}
+          </div>
+        </div>
+
+        <div style="padding:12px 14px;border:1px dashed var(--ui-border-strong);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div style="font-size:12px;color:var(--ui-text-secondary);">
+            <b>免設定 OAuth 備用方案：</b>直接打包本心智圖原檔（<code>.mindflow.json</code> + <code>.xmind</code>）與所有節點附件／影片成單一 ZIP，手動拖進 Google Drive！
+          </div>
+          <button class="btn btn-sm" id="gd-bundle-zip-btn" style="white-space:nowrap;">📦 下載完整 ZIP 套件</button>
+        </div>
+      </div>
+    `);
+
+    const loadList = async () => {
+      const listEl = this.root.querySelector('#gd-cloud-list');
+      if (!gdrive.isConnected() || !listEl) return;
+      listEl.textContent = '⏳ 正在讀取 Google Drive / MindFlow 資料夾...';
+      try {
+        const items = await gdrive.listSavedMindMaps();
+        if (!items.length) {
+          listEl.textContent = 'Google Drive / MindFlow 目前尚無已同步的心智圖。';
+          return;
+        }
+        listEl.innerHTML = items.map(it => `
+          <div class="att-item">
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:600;color:var(--ui-text);">${esc(it.folderName)}</div>
+              <div style="font-size:11px;color:var(--ui-text-muted);">更新於 ${new Date(it.modifiedTime).toLocaleString()}</div>
+            </div>
+            <a class="btn btn-sm" href="${esc(it.folderUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">雲端資料夾</a>
+            <button class="btn btn-sm btn-primary" data-gd-open="${it.jsonFileId}">載入編輯</button>
+          </div>
+        `).join('');
+        listEl.querySelectorAll('[data-gd-open]').forEach(btn => {
+          btn.onclick = async () => {
+            try {
+              showToast('正在從 Google Drive 載入心智圖...');
+              const loaded = await gdrive.downloadJsonFile(btn.dataset.gdOpen);
+              if (loaded?.sheets?.[0]?.root) {
+                store.importAsSheetOrDoc(loaded.sheets[0].root, {
+                  title: loaded.title || 'Google Drive 心智圖',
+                  sheets: loaded.sheets,
+                  asNewDoc: true
+                });
+                const cur = store.getActiveDoc();
+                cur.driveFolderId = loaded.driveFolderId || '';
+                cur.driveFolderUrl = loaded.driveFolderUrl || '';
+                cur.driveJsonFileId = btn.dataset.gdOpen;
+                cur.driveXmindFileId = loaded.driveXmindFileId || '';
+                cur.driveLastSyncedAt = loaded.driveLastSyncedAt || '';
+                store._saveToStorage();
+                this.close();
+                showToast(`已從 Google Drive 載入「${loaded.title}」！`, 'success');
+              }
+            } catch (err) {
+              showToast(`載入失敗：${err.message}`, 'error', 4000);
+            }
+          };
+        });
+      } catch (err) {
+        listEl.textContent = `讀取清單失敗：${err.message}`;
+      }
+    };
+
+    this.root.querySelector('#gd-connect-btn').onclick = async () => {
+      const cid = this.root.querySelector('#gd-client-id').value.trim();
+      try {
+        await gdrive.connect(cid);
+        showToast('已成功連線至 Google 雲端硬碟！', 'success');
+        this.openGoogleDrive();
+      } catch (err) {
+        showToast(`連線失敗：${err.message}`, 'error', 4500);
+      }
+    };
+
+    this.root.querySelector('#gd-disconnect-btn')?.addEventListener('click', () => {
+      gdrive.disconnect();
+      showToast('已中斷 Google Drive 連線');
+      this.openGoogleDrive();
+    });
+
+    this.root.querySelector('#gd-sync-now-btn')?.addEventListener('click', async () => {
+      const statusEl = this.root.querySelector('#gd-sync-status');
+      const btn = this.root.querySelector('#gd-sync-now-btn');
+      btn.disabled = true;
+      try {
+        const res = await gdrive.syncDocument(
+          store.getActiveDoc(),
+          (d) => buildXMindBlob(d),
+          (msg) => { if (statusEl) statusEl.textContent = `⏳ ${msg}`; }
+        );
+        store._saveToStorage();
+        store.notify('doc');
+        showToast(`☁️ 同步完成！已上傳 ${res.uploadedCount} 個新附件並備份原檔`, 'success', 4000);
+        this.openGoogleDrive();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = `同步失敗：${err.message}`;
+        showToast(`同步失敗：${err.message}`, 'error', 4500);
+        btn.disabled = false;
+      }
+    });
+
+    this.root.querySelector('#gd-refresh-list-btn')?.addEventListener('click', loadList);
+    this.root.querySelector('#gd-bundle-zip-btn').onclick = async () => {
+      showToast('正在打包心智圖與所有附件...');
+      await exportFullBundleZip();
+      showToast('已下載完整 ZIP 套件，可直接拖入 Google Drive！', 'success');
+    };
+
+    if (connected) loadList();
+  }
+
+  // =========================================================================
+  // 6. Video Player Lightbox Modal (Local IndexedDB / YouTube / Google Drive / Direct URL)
+  // =========================================================================
+  async openVideoPlayer(node) {
+    const v = node?.video;
+    if (!v) return;
+
+    let playerHtml = '';
+    let objectUrlToRevoke = null;
+
+    if (v.localBlobId) {
+      objectUrlToRevoke = await getMediaObjectUrl(v.localBlobId);
+    }
+
+    if (objectUrlToRevoke) {
+      playerHtml = `<video src="${objectUrlToRevoke}" controls autoplay playsinline style="width:100%;max-height:66vh;border-radius:10px;background:#000;"></video>`;
+    } else if (v.sourceType === 'youtube' || v.sourceType === 'gdrive' || v.driveFileId) {
+      const embedSrc = v.embedUrl || `https://drive.google.com/file/d/${v.driveFileId}/preview`;
+      playerHtml = `<iframe src="${esc(embedSrc)}" allow="autoplay; fullscreen" allowfullscreen style="display:block;width:100%;aspect-ratio:16/9;max-height:58vh;border:none;border-radius:10px;background:#000;"></iframe>`;
+    } else if (v.url) {
+      playerHtml = `<video src="${esc(v.url)}" controls autoplay playsinline style="width:100%;max-height:66vh;border-radius:10px;background:#000;"></video>`;
+    } else {
+      playerHtml = `<div style="padding:40px;text-align:center;color:var(--ui-text-muted);">找不到影片來源，請確認已同步至 Google Drive 或重新上傳影片。</div>`;
+    }
+
+    this._open(`
+      <div class="modal-header">
+        <h3>🎬 ${esc(v.name || v.title || node.title)}</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="padding:14px 18px;">
+        ${playerHtml}
+      </div>
+      <div class="modal-footer">
+        <span style="margin-right:auto;font-size:12px;color:var(--ui-text-muted);">所屬知識節點：${esc(node.title)}</span>
+        ${v.driveWebViewLink ? `<a class="btn btn-sm" href="${esc(v.driveWebViewLink)}" target="_blank" rel="noopener" style="text-decoration:none;">☁️ 在 Google Drive 開啟</a>` : ''}
+        <button class="btn btn-primary" data-close-modal>關閉</button>
+      </div>
+    `);
+
+    if (objectUrlToRevoke) {
+      const origClose = this.close.bind(this);
+      const cleanup = () => {
+        if (objectUrlToRevoke) {
+          URL.revokeObjectURL(objectUrlToRevoke);
+          objectUrlToRevoke = null;
+        }
+      };
+      this.root.querySelectorAll('[data-close-modal]').forEach(btn => {
+        btn.onclick = () => { cleanup(); origClose(); };
+      });
+    }
+  }
+
+  // =========================================================================
+  // 7. Image Lightbox Modal
+  // =========================================================================
+  openImageLightbox(node) {
+    if (!node?.image) return;
+    this._open(`
+      <div class="modal-header">
+        <h3>🖼️ ${esc(node.title)}</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="text-align:center;background:#0f172a;padding:16px;">
+        <img src="${esc(node.image)}" alt="${esc(node.title)}" style="max-width:100%;max-height:70vh;border-radius:8px;object-fit:contain;" />
+      </div>
+      <div class="modal-footer">
+        <a class="btn btn-sm" href="${esc(node.image)}" download="${esc(node.title)}.png" style="text-decoration:none;">下載圖片</a>
+        <button class="btn btn-primary" data-close-modal>關閉</button>
+      </div>
+    `);
+  }
+
+  // =========================================================================
+  // 8. Node Attachments Viewer Modal
+  // =========================================================================
+  openAttachmentsModal(node) {
+    if (!node) return;
+    store.selectNode(node.id);
+    const list = node.attachments || [];
+    this._open(`
+      <div class="modal-header">
+        <h3>📎 附加檔案 · ${esc(node.title)} (${list.length})</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;">
+        ${list.map((att, idx) => `
+          <div class="att-item">
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:600;">${att.driveFileId ? '☁️ ' : '📄 '}${esc(att.name)}</div>
+              <div style="font-size:11.5px;color:var(--ui-text-muted);">
+                ${att.size ? formatBytes(att.size) : '雲端 / 外部連結'}${att.driveFileId ? ' · 已同步至 Google Drive' : ' · 本機 IndexedDB'}
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary" data-modal-open-att="${idx}">下載 / 開啟</button>
+          </div>
+        `).join('') || `<div style="padding:24px;text-align:center;color:var(--ui-text-muted);">此節點尚無附加檔案，請於右側主題面板上傳！</div>`}
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="att-modal-gdrive-btn">☁️ 同步至 Google Drive</button>
+        <button class="btn btn-primary" data-close-modal>完成</button>
+      </div>
+    `);
+
+    this.root.querySelector('#att-modal-gdrive-btn').onclick = () => this.openGoogleDrive();
+    this.root.querySelectorAll('[data-modal-open-att]').forEach(btn => {
+      btn.onclick = async () => {
+        const att = list[Number(btn.dataset.modalOpenAtt)];
+        if (!att) return;
+        if (att.localBlobId) {
+          const objUrl = await getMediaObjectUrl(att.localBlobId);
+          if (objUrl) {
+            const a = document.createElement('a');
+            a.href = objUrl;
+            a.download = att.name;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
+            return;
+          }
+        }
+        if (att.driveWebViewLink || att.url) {
+          window.open(att.driveWebViewLink || att.url, '_blank', 'noopener');
+        } else if (att.driveFileId) {
+          window.open(`https://drive.google.com/file/d/${att.driveFileId}/view`, '_blank', 'noopener');
+        }
+      };
+    });
   }
 }

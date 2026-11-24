@@ -4,6 +4,18 @@
  * - Topic Tab: Per-Branch Mixed Structure, Shape, Colors, Typography, Markers, Labels, Notes, Link, Image, To-Do, Task, Boundary/Summary/Callout, Copy/Paste/Reset Style
  */
 
+import { gdrive } from '../core/gdrive.js';
+import {
+  deleteMediaBlob,
+  extractGoogleDriveFileId,
+  extractVideoMetadata,
+  formatBytes,
+  getMediaObjectUrl,
+  parseVideoUrl,
+  readImageAsDataUrl,
+  saveMediaBlob
+} from '../core/mediaDb.js';
+import { uid } from '../core/schema.js';
 import { store } from '../core/store.js';
 import {
   BRANCH_PALETTES,
@@ -21,8 +33,9 @@ function esc(s) {
 }
 
 export class InspectorPanel {
-  constructor(el) {
+  constructor(el, modals = null) {
     this.el = el;
+    this.modals = modals;
   }
 
   render() {
@@ -266,16 +279,78 @@ export class InspectorPanel {
       </div>
 
       <div class="insp-section">
-        <div class="insp-title">筆記、超連結與圖片</div>
+        <div class="insp-title">筆記與超連結</div>
         <textarea id="tp-notes" class="ui-textarea" placeholder="輸入詳細筆記或參考摘要...">${esc(node.notes || '')}</textarea>
         <input id="tp-link" class="ui-input" placeholder="https:// 網頁連結..." value="${esc(node.link || '')}" />
+      </div>
+
+      <div class="insp-section">
+        <div class="insp-title">🖼️ 圖片與 🎬 影片（自動縮圖＋播放）</div>
+        <div class="field-label">匯入圖片（支援本機上傳或圖片 / Google Drive 網址）</div>
         <div style="display:flex;gap:5px;align-items:center;">
           <input id="tp-image-url" class="ui-input" placeholder="圖片網址或右側上傳..." value="${esc(node.image?.startsWith('data:') ? '(已嵌入本機圖片)' : (node.image || ''))}" />
           <label class="btn btn-sm" style="white-space:nowrap;margin:0;cursor:pointer;">
             上傳
             <input type="file" id="tp-image-file" accept="image/*" class="hidden" />
           </label>
-          ${node.image ? `<button class="btn btn-sm btn-danger" id="tp-image-clear">✕</button>` : ''}
+          ${node.image ? `<button class="btn btn-sm btn-danger" id="tp-image-clear" title="移除圖片">✕</button>` : ''}
+        </div>
+
+        <div class="field-label" style="margin-top:6px;">匯入影片（支援本機 MP4/WebM、YouTube 或 Google Drive 影片）</div>
+        <div style="display:flex;gap:5px;align-items:center;">
+          <input id="tp-video-url" class="ui-input" placeholder="貼上 YouTube / Drive / MP4 網址..." value="${esc(node.video?.url || '')}" />
+          <button class="btn btn-sm" id="tp-video-url-apply" style="white-space:nowrap;">套用</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <label class="btn btn-sm btn-primary" style="flex:1;margin:0;cursor:pointer;">
+            🎬 上傳本機影片（自動產生縮圖）
+            <input type="file" id="tp-video-file" accept="video/*" class="hidden" />
+          </label>
+          ${node.video ? `<button class="btn btn-sm btn-danger" id="tp-video-clear" title="移除影片">✕</button>` : ''}
+        </div>
+        ${node.video ? `
+          <div class="video-thumb-card" id="tp-video-preview" title="點擊播放影片">
+            ${node.video.thumbnail
+              ? `<img src="${esc(node.video.thumbnail)}" alt="影片縮圖" />`
+              : `<div class="video-thumb-fallback">🎬 ${esc(node.video.name || node.video.title || '已附加影片')}</div>`}
+            <div class="video-play-badge">▶</div>
+            <div class="video-meta-strip">
+              <span>${esc(node.video.name || node.video.title || '影片')}</span>
+              <span>${esc(node.video.duration || (node.video.driveFileId ? '☁️ Drive' : ''))}</span>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="insp-section">
+        <div class="insp-title">
+          <span>📎 附加檔案 (${(node.attachments || []).length})</span>
+          <span style="font-size:10.5px;color:${gdrive.isConnected() ? 'var(--success)' : 'var(--ui-text-muted)'};">
+            ${gdrive.isConnected() ? '☁️ 自動同步 Drive' : '💾 存本機 / 可同步 Drive'}
+          </span>
+        </div>
+        <div style="display:flex;gap:5px;">
+          <label class="btn btn-sm btn-primary" style="flex:1;margin:0;cursor:pointer;">
+            ＋ 上傳附加檔案 (PDF/Office/任意檔)
+            <input type="file" id="tp-att-files" multiple class="hidden" />
+          </label>
+          <button class="btn btn-sm" id="tp-att-link-btn" title="新增 Google Drive 或外部檔案連結">＋連結</button>
+        </div>
+        <div class="att-list">
+          ${(node.attachments || []).map((att, idx) => `
+            <div class="att-item">
+              <div style="min-width:0;flex:1;">
+                <div style="font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(att.name)}">
+                  ${att.driveFileId ? '☁️ ' : '📄 '}${esc(att.name)}
+                </div>
+                <div style="font-size:10.5px;color:var(--ui-text-muted);">
+                  ${att.size ? formatBytes(att.size) : '外部連結'}${att.driveFileId ? ' · 已存 Google Drive' : ' · 本機快取'}
+                </div>
+              </div>
+              <button class="btn btn-sm" data-open-att="${idx}" title="開啟或下載">⬇</button>
+              <button class="btn btn-sm btn-danger" data-del-att="${idx}" title="移除附件">✕</button>
+            </div>
+          `).join('') || `<div style="font-size:11.5px;color:var(--ui-text-muted);">尚未附加任何檔案</div>`}
         </div>
       </div>
 
@@ -399,16 +474,166 @@ export class InspectorPanel {
     this.el.querySelector('#tp-link').onchange = (e) => store.updateNode(id, { link: e.target.value.trim() });
     this.el.querySelector('#tp-image-url').onchange = (e) => {
       const v = e.target.value.trim();
-      if (v && v !== '(已嵌入本機圖片)') store.updateNode(id, { image: v });
+      if (!v || v === '(已嵌入本機圖片)') return;
+      const gdId = extractGoogleDriveFileId(v);
+      const finalUrl = gdId ? `https://drive.google.com/thumbnail?id=${gdId}&sz=w800` : v;
+      store.updateNode(id, { image: finalUrl });
     };
-    this.el.querySelector('#tp-image-file').onchange = (e) => {
+    this.el.querySelector('#tp-image-file').onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => store.updateNode(id, { image: String(reader.result) });
-      reader.readAsDataURL(file);
+      try {
+        const dataUrl = await readImageAsDataUrl(file, 960);
+        store.updateNode(id, { image: dataUrl });
+        if (gdrive.isConnected()) {
+          showToast('正在同步圖片至 Google Drive...');
+          await gdrive.uploadNodeMedia(store.getActiveDoc(), file);
+          showToast('圖片已匯入並同步至 Google Drive！', 'success');
+        } else {
+          showToast('圖片已匯入節點！', 'success');
+        }
+      } catch (err) {
+        showToast(`圖片處理失敗：${err.message}`, 'error');
+      }
     };
     this.el.querySelector('#tp-image-clear')?.addEventListener('click', () => store.updateNode(id, { image: '' }));
+
+    // Video URL & Local Upload (with auto thumbnail extraction!)
+    const applyVideoUrl = () => {
+      const urlVal = this.el.querySelector('#tp-video-url').value.trim();
+      if (!urlVal) return;
+      const parsed = parseVideoUrl(urlVal);
+      if (parsed) {
+        store.updateNode(id, { video: parsed });
+        showToast('已匯入影片與縮圖！點擊縮圖即可播放', 'success');
+      }
+    };
+    this.el.querySelector('#tp-video-url-apply').onclick = applyVideoUrl;
+    this.el.querySelector('#tp-video-url').onkeydown = (e) => { if (e.key === 'Enter') applyVideoUrl(); };
+
+    this.el.querySelector('#tp-video-file').onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        showToast('正在擷取影片縮圖並儲存...');
+        const blobId = uid('vid');
+        await saveMediaBlob(blobId, file, { name: file.name, mimeType: file.type });
+        const meta = await extractVideoMetadata(file);
+        const videoObj = {
+          sourceType: 'local',
+          name: file.name,
+          mimeType: file.type || 'video/mp4',
+          size: file.size,
+          localBlobId: blobId,
+          thumbnail: meta.thumbnail,
+          duration: meta.duration
+        };
+        if (gdrive.isConnected()) {
+          showToast('正在上傳影片至 Google Drive attachments/...');
+          const up = await gdrive.uploadNodeMedia(store.getActiveDoc(), file);
+          videoObj.driveFileId = up.driveFileId;
+          videoObj.driveWebViewLink = up.driveWebViewLink;
+          videoObj.embedUrl = `https://drive.google.com/file/d/${up.driveFileId}/preview`;
+        }
+        store.updateNode(id, { video: videoObj });
+        showToast('影片匯入完成！已自動產生縮圖與播放按鈕', 'success');
+      } catch (err) {
+        showToast(`影片匯入失敗：${err.message}`, 'error', 4000);
+      }
+    };
+    this.el.querySelector('#tp-video-clear')?.addEventListener('click', () => {
+      if (node.video?.localBlobId) deleteMediaBlob(node.video.localBlobId).catch(() => {});
+      store.updateNode(id, { video: null });
+    });
+    this.el.querySelector('#tp-video-preview')?.addEventListener('click', () => {
+      if (this.modals) this.modals.openVideoPlayer(node);
+    });
+
+    // File Attachments (Multi-file upload + Google Drive sync + External/Drive link)
+    this.el.querySelector('#tp-att-files').onchange = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+      const added = [];
+      for (const file of files) {
+        const blobId = uid('att');
+        await saveMediaBlob(blobId, file, { name: file.name, mimeType: file.type });
+        const att = {
+          id: uid('f'),
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          localBlobId: blobId,
+          uploadedAt: new Date().toISOString()
+        };
+        if (gdrive.isConnected()) {
+          try {
+            showToast(`正在上傳附件至 Google Drive：${file.name}...`);
+            const up = await gdrive.uploadNodeMedia(store.getActiveDoc(), file);
+            att.driveFileId = up.driveFileId;
+            att.driveWebViewLink = up.driveWebViewLink;
+          } catch (err) {
+            showToast(`雲端上傳失敗（已保留於本機）：${err.message}`, 'error', 4000);
+          }
+        }
+        added.push(att);
+      }
+      store.updateNode(id, { attachments: [...(node.attachments || []), ...added] });
+      showToast(`已附加 ${added.length} 個檔案！`, 'success');
+    };
+
+    this.el.querySelector('#tp-att-link-btn').onclick = () => {
+      const url = prompt('請貼上 Google Drive 檔案分享連結或任意檔案網址：');
+      if (!url || !url.trim()) return;
+      const cleanUrl = url.trim();
+      const gdId = extractGoogleDriveFileId(cleanUrl);
+      const defaultName = gdId ? 'Google Drive 附加檔案' : (cleanUrl.split('/').pop()?.split('?')[0] || '外部附件');
+      const name = prompt('請輸入附件顯示名稱：', defaultName) || defaultName;
+      const att = {
+        id: uid('f'),
+        name: name.trim(),
+        mimeType: 'text/uri-list',
+        size: 0,
+        url: cleanUrl,
+        driveFileId: gdId || '',
+        driveWebViewLink: gdId ? cleanUrl : '',
+        uploadedAt: new Date().toISOString()
+      };
+      store.updateNode(id, { attachments: [...(node.attachments || []), att] });
+      showToast('已加入檔案連結附件', 'success');
+    };
+
+    this.el.querySelectorAll('[data-open-att]').forEach(btn => {
+      btn.onclick = async () => {
+        const att = (node.attachments || [])[Number(btn.dataset.openAtt)];
+        if (!att) return;
+        if (att.localBlobId) {
+          const objUrl = await getMediaObjectUrl(att.localBlobId);
+          if (objUrl) {
+            const a = document.createElement('a');
+            a.href = objUrl;
+            a.download = att.name;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
+            return;
+          }
+        }
+        if (att.driveWebViewLink || att.url) {
+          window.open(att.driveWebViewLink || att.url, '_blank', 'noopener');
+        } else if (att.driveFileId) {
+          window.open(`https://drive.google.com/file/d/${att.driveFileId}/view`, '_blank', 'noopener');
+        }
+      };
+    });
+
+    this.el.querySelectorAll('[data-del-att]').forEach(btn => {
+      btn.onclick = () => {
+        const idx = Number(btn.dataset.delAtt);
+        const target = (node.attachments || [])[idx];
+        if (target?.localBlobId) deleteMediaBlob(target.localBlobId).catch(() => {});
+        const next = (node.attachments || []).filter((_, i) => i !== idx);
+        store.updateNode(id, { attachments: next });
+      };
+    });
 
     // To-Do & Task
     this.el.querySelector('#tp-todo-toggle').onchange = (e) => {

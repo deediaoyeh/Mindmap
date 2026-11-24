@@ -471,7 +471,10 @@ export class MindMapCanvas {
       return;
     }
 
-    const rx = visual.shape === 'pill' ? h / 2 : visual.shape === 'rect' ? 3 : (depth === 0 ? 12 : 9);
+    const hasMedia = Boolean(item.node.image || item.node.video);
+    const rx = visual.shape === 'pill'
+      ? (hasMedia ? 16 : h / 2)
+      : visual.shape === 'rect' ? 3 : (depth === 0 ? 12 : 9);
     el('rect', {
       x, y, width: w, height: h, rx,
       fill, stroke, 'stroke-width': strokeW,
@@ -505,19 +508,81 @@ export class MindMapCanvas {
       let curX = x + box.padX;
       const contentTop = y + box.padY;
 
-      // Optional embedded image
+      // Optional embedded image (clickable for lightbox)
       let textTop = contentTop;
       if (node.image) {
+        const imgW = 148;
+        const imgH = 86;
+        const ix = x + (w - imgW) / 2;
+        const imgClipId = `clip_img_${node.id}`;
+        const cp = el('clipPath', { id: imgClipId }, g);
+        el('rect', { x: ix, y: textTop, width: imgW, height: imgH, rx: 7 }, cp);
+        const ig = el('g', { class: 'node-image-btn', 'data-img-node': node.id, style: 'cursor:pointer' }, g);
         el('image', {
           href: node.image,
-          x: x + (w - 140) / 2,
-          y: contentTop,
-          width: 140,
-          height: 86,
+          x: ix,
+          y: textTop,
+          width: imgW,
+          height: imgH,
           preserveAspectRatio: 'xMidYMid slice',
-          style: 'border-radius:6px'
-        }, g);
+          'clip-path': `url(#${imgClipId})`
+        }, ig);
+        el('rect', { x: ix, y: textTop, width: imgW, height: imgH, rx: 7, fill: 'none', stroke: 'rgba(15,23,42,0.12)', 'stroke-width': 1 }, ig);
+        el('title', {}, ig).textContent = '點擊放大檢視圖片';
         textTop += 96;
+      }
+
+      // Optional embedded video thumbnail + Play Button overlay
+      if (node.video) {
+        const vw = 164;
+        const vh = 94;
+        const vx = x + (w - vw) / 2;
+        const vy = textTop;
+        const vidClipId = `clip_vid_${node.id}`;
+        const cp = el('clipPath', { id: vidClipId }, g);
+        el('rect', { x: vx, y: vy, width: vw, height: vh, rx: 8 }, cp);
+
+        const vg = el('g', { class: 'node-video-btn', 'data-video-node': node.id, style: 'cursor:pointer' }, g);
+        // Dark cinema poster backdrop
+        el('rect', { x: vx, y: vy, width: vw, height: vh, rx: 8, fill: '#0f172a' }, vg);
+
+        if (node.video.thumbnail) {
+          el('image', {
+            href: node.video.thumbnail,
+            x: vx,
+            y: vy,
+            width: vw,
+            height: vh,
+            preserveAspectRatio: 'xMidYMid slice',
+            'clip-path': `url(#${vidClipId})`
+          }, vg);
+          // Subtle scrim so play button pops
+          el('rect', { x: vx, y: vy, width: vw, height: vh, rx: 8, fill: 'rgba(15, 23, 42, 0.28)' }, vg);
+        } else {
+          // Stylish gradient-like fallback poster with film label
+          el('rect', { x: vx, y: vy, width: vw, height: vh, rx: 8, fill: '#1e1b4b' }, vg);
+          const vLabel = el('text', { x: vx + vw / 2, y: vy + vh - 12, 'text-anchor': 'middle', fill: '#cbd5e1', 'font-size': 10, 'font-weight': 600 }, vg);
+          vLabel.textContent = (node.video.name || node.video.title || '影片').slice(0, 18);
+        }
+
+        // Centered Circular Play Button
+        const pcx = vx + vw / 2;
+        const pcy = vy + vh / 2;
+        el('circle', { cx: pcx, cy: pcy, r: 19, fill: 'rgba(15, 23, 42, 0.72)', stroke: '#ffffff', 'stroke-width': 2 }, vg);
+        el('polygon', {
+          points: `${pcx - 5},${pcy - 8} ${pcx - 5},${pcy + 8} ${pcx + 9},${pcy}`,
+          fill: '#ffffff'
+        }, vg);
+
+        // Video badge (duration or cloud icon)
+        const badgeText = node.video.duration || (node.video.sourceType === 'youtube' ? 'YT' : node.video.driveFileId ? '☁️' : 'VIDEO');
+        const bw = Math.max(30, badgeText.length * 7 + 12);
+        el('rect', { x: vx + vw - bw - 6, y: vy + vh - 20, width: bw, height: 15, rx: 4, fill: 'rgba(0,0,0,0.72)' }, vg);
+        const bt = el('text', { x: vx + vw - bw / 2 - 6, y: vy + vh - 9, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 9.5, 'font-weight': 700 }, vg);
+        bt.textContent = badgeText;
+
+        el('title', {}, vg).textContent = `點擊播放影片：${node.video.name || node.video.title || '影片'}`;
+        textTop += 104;
       }
 
       const firstLineMidY = textTop + box.lineHeight * 0.55;
@@ -584,8 +649,32 @@ export class MindMapCanvas {
         t.textContent = line;
       });
 
-      // Right-side indicator badges (Note, Link, Task)
+      // Right-side indicator badges (Attachments, Note, Link, Task)
       let bx = x + w - box.padX - 6;
+      if (node.attachments && node.attachments.length > 0) {
+        const ag = el('g', { class: 'node-att-btn', 'data-att-node': node.id, style: 'cursor:pointer' }, g);
+        const aw = 32;
+        el('rect', {
+          x: bx - aw + 8,
+          y: firstLineMidY - 9,
+          width: aw,
+          height: 17,
+          rx: 8,
+          fill: visual.branchColor,
+          opacity: 0.18
+        }, ag);
+        const at = el('text', {
+          x: bx - aw / 2 + 8,
+          y: firstLineMidY + 3.5,
+          'text-anchor': 'middle',
+          fill: visual.branchColor,
+          'font-size': 10.5,
+          'font-weight': 700
+        }, ag);
+        at.textContent = `📎${node.attachments.length}`;
+        el('title', {}, ag).textContent = `檢視 ${node.attachments.length} 個附加檔案`;
+        bx -= 38;
+      }
       if (node.link) {
         const lg = el('g', { class: 'node-link-btn', 'data-link': node.link, style: 'cursor:pointer' }, g);
         const lt = el('text', { x: bx, y: firstLineMidY + 4, 'text-anchor': 'middle', 'font-size': 12 }, lg);
@@ -849,6 +938,33 @@ export class MindMapCanvas {
             origOffset: { ...(rel.controlOffset || { x: 0, y: -70 }) }
           };
         }
+        return;
+      }
+
+      // Video play button click
+      const videoBtn = e.target.closest('.node-video-btn');
+      if (videoBtn) {
+        e.stopPropagation();
+        const node = store.findNode(videoBtn.dataset.videoNode);
+        if (node && this.onOpenVideo) this.onOpenVideo(node);
+        return;
+      }
+
+      // Image click -> Lightbox
+      const imgBtn = e.target.closest('.node-image-btn');
+      if (imgBtn) {
+        e.stopPropagation();
+        const node = store.findNode(imgBtn.dataset.imgNode);
+        if (node && this.onOpenImage) this.onOpenImage(node);
+        return;
+      }
+
+      // Attachments badge click
+      const attBtn = e.target.closest('.node-att-btn');
+      if (attBtn) {
+        e.stopPropagation();
+        const node = store.findNode(attBtn.dataset.attNode);
+        if (node && this.onOpenAttachments) this.onOpenAttachments(node);
         return;
       }
 

@@ -19,6 +19,8 @@ export function createNode(title = '新主題', extras = {}) {
     markers: Array.isArray(extras.markers) ? [...extras.markers] : [],
     link: extras.link || '',
     image: extras.image || '',
+    video: extras.video ? { ...extras.video } : null,
+    attachments: Array.isArray(extras.attachments) ? extras.attachments.map(a => ({ ...a })) : [],
     todo: extras.todo ? { checked: Boolean(extras.todo.checked) } : null,
     task: extras.task ? { ...extras.task } : null,
     callout: extras.callout ? { text: extras.callout.text || '標註說明', color: extras.callout.color || '#f59e0b' } : null,

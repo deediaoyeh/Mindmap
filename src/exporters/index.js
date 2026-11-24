@@ -8,6 +8,7 @@
  *  - Zero-backend compressed shareable URL (#map=...) & Embed iframe snippet
  */
 
+import { getMediaRecord } from '../core/mediaDb.js';
 import { store } from '../core/store.js';
 import { compressStringToUrl, createZip } from '../core/zip.js';
 
@@ -215,11 +216,9 @@ export function exportJSON() {
 }
 
 /**
- * Export an authentic XMind Zen (.xmind) ZIP package containing content.json, metadata.json, manifest.json.
+ * Build an authentic XMind Zen (.xmind) ZIP Blob (reused by both local download and Google Drive sync).
  */
-export async function exportXMind() {
-  const doc = store.getActiveDoc();
-
+export async function buildXMindBlob(doc = store.getActiveDoc()) {
   function mapStructureClass(struct) {
     const table = {
       'mindmap': 'org.xmind.ui.map.unbalanced',
@@ -266,7 +265,7 @@ export async function exportXMind() {
   }));
 
   const metadataJson = {
-    creator: { name: 'MindFlow', version: '1.0.0' },
+    creator: { name: 'MindFlow', version: '1.1.0' },
     activeSheetId: doc.activeSheetId
   };
 
@@ -277,13 +276,66 @@ export async function exportXMind() {
     }
   };
 
-  const zipBlob = await createZip({
+  return createZip({
     'content.json': JSON.stringify(contentJson, null, 2),
     'metadata.json': JSON.stringify(metadataJson, null, 2),
     'manifest.json': JSON.stringify(manifestJson, null, 2)
   });
+}
 
+export async function exportXMind() {
+  const doc = store.getActiveDoc();
+  const zipBlob = await buildXMindBlob(doc);
   triggerDownload(zipBlob, safeFileName(doc.title, 'xmind'), 'application/octet-stream');
+}
+
+/**
+ * Package the original mind map (.mindflow.json + .xmind) AND all local node attachments/videos
+ * into a single ZIP folder ready to upload straight into Google Drive!
+ */
+export async function exportFullBundleZip() {
+  const doc = store.getActiveDoc();
+  const safeTitle = String(doc.title || 'MindFlow').replace(/[\\/:*?"<>|]/g, '_');
+  const files = {};
+
+  files[`${safeTitle}/${safeTitle}.mindflow.json`] = JSON.stringify(doc, null, 2);
+  const xmindBlob = await buildXMindBlob(doc);
+  files[`${safeTitle}/${safeTitle}.xmind`] = new Uint8Array(await xmindBlob.arrayBuffer());
+
+  // Collect local attachments & videos from IndexedDB
+  const usedNames = new Set();
+  const uniqueName = (raw) => {
+    let name = String(raw || 'file').replace(/[\\/:*?"<>|]/g, '_');
+    let i = 1;
+    while (usedNames.has(name)) {
+      const dot = name.lastIndexOf('.');
+      name = dot > 0 ? `${name.slice(0, dot)}_${i++}${name.slice(dot)}` : `${name}_${i++}`;
+    }
+    usedNames.add(name);
+    return name;
+  };
+
+  for (const s of doc.sheets) {
+    for (const { node } of store.getAllNodes(s)) {
+      for (const att of (node.attachments || [])) {
+        if (att.localBlobId) {
+          const rec = await getMediaRecord(att.localBlobId);
+          if (rec?.blob) {
+            files[`${safeTitle}/attachments/${uniqueName(att.name)}`] = new Uint8Array(await rec.blob.arrayBuffer());
+          }
+        }
+      }
+      if (node.video?.localBlobId) {
+        const rec = await getMediaRecord(node.video.localBlobId);
+        if (rec?.blob) {
+          files[`${safeTitle}/attachments/${uniqueName(node.video.name || 'video.mp4')}`] = new Uint8Array(await rec.blob.arrayBuffer());
+        }
+      }
+    }
+  }
+
+  const bundleBlob = await createZip(files);
+  triggerDownload(bundleBlob, `${safeTitle}_GoogleDrive套件.zip`, 'application/zip');
 }
 
 export function exportTasksCSV() {
