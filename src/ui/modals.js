@@ -8,8 +8,9 @@
 
 import { gdrive } from '../core/gdrive.js';
 import { formatBytes, getMediaObjectUrl } from '../core/mediaDb.js';
-import { TEMPLATES } from '../core/schema.js';
+import { createNode, createSheet, TEMPLATES } from '../core/schema.js';
 import { store } from '../core/store.js';
+import { STRUCTURES, THEMES } from '../render/themes.js';
 import {
   buildXMindBlob,
   exportFreeMind,
@@ -58,6 +59,89 @@ export class ModalManager {
     this.root.querySelectorAll('[data-close-modal]').forEach(btn => {
       btn.onclick = () => this.close();
     });
+  }
+
+  // =========================================================================
+  // 0. Create New File Dialog
+  // =========================================================================
+  openNewFile() {
+    const defaultName = `心智圖 ${store.docs.length + 1}`;
+    this._open(`
+      <div class="modal-header">
+        <h3>📄 建立新心智圖檔案</h3>
+        <button class="btn btn-sm" data-close-modal>✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <div class="field-label" style="margin-bottom:5px;font-weight:600;">檔案名稱</div>
+          <input id="nf-title" class="ui-input" value="${esc(defaultName)}" placeholder="輸入新心智圖名稱..." />
+        </div>
+
+        <div class="grid-2" style="gap:10px;">
+          <div>
+            <div class="field-label" style="margin-bottom:5px;font-weight:600;">初始視覺結構</div>
+            <select id="nf-structure" class="ui-select">
+              ${STRUCTURES.map(s => `<option value="${s.id}">${s.icon} ${s.name}（${s.sub}）</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <div class="field-label" style="margin-bottom:5px;font-weight:600;">風格主題</div>
+            <select id="nf-theme" class="ui-select">
+              ${Object.values(THEMES).map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="padding-top:10px;border-top:1px solid var(--ui-border);">
+          <div class="field-label" style="margin-bottom:8px;font-weight:600;">或者從其他來源建立</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm" id="nf-from-tpl">📑 從精選範本建立</button>
+            <button class="btn btn-sm" id="nf-from-file">📂 開啟電腦檔案 (.xmind / .json / .md / .opml)</button>
+            <button class="btn btn-sm" id="nf-from-nlm">✨ 從 NotebookLM 匯入</button>
+            <button class="btn btn-sm" id="nf-from-works">🗂️ 管理現有檔案 (${store.docs.length})</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-close-modal>取消</button>
+        <button class="btn btn-primary" id="nf-create-btn">＋ 立即建立新檔案</button>
+      </div>
+    `);
+
+    const titleEl = this.root.querySelector('#nf-title');
+    titleEl.focus();
+    titleEl.select();
+
+    const doCreate = () => {
+      const title = titleEl.value.trim() || defaultName;
+      const structure = this.root.querySelector('#nf-structure').value;
+      const themeId = this.root.querySelector('#nf-theme').value;
+      const theme = THEMES[themeId] || THEMES['xmind-classic'];
+      const sheet = createSheet('畫布 1', createNode(title, {
+        children: [createNode('主要分支 1'), createNode('主要分支 2'), createNode('主要分支 3')]
+      }), {
+        structure,
+        themeId,
+        branchPaletteId: theme.paletteId
+      });
+      store.createNewDocument(title, sheet);
+      this.close();
+      showToast(`已建立新檔案「${title}」`, 'success');
+    };
+
+    this.root.querySelector('#nf-create-btn').onclick = doCreate;
+    titleEl.onkeydown = (e) => { if (e.key === 'Enter') doCreate(); };
+
+    this.root.querySelector('#nf-from-tpl').onclick = () => this.openTemplates();
+    this.root.querySelector('#nf-from-nlm').onclick = () => this.openNotebookLM();
+    this.root.querySelector('#nf-from-works').onclick = () => {
+      this.close();
+      store.toggleLeftDrawer('works');
+    };
+    this.root.querySelector('#nf-from-file').onclick = () => {
+      this.close();
+      document.getElementById('global-file-input')?.click();
+    };
   }
 
   // =========================================================================

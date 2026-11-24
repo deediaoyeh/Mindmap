@@ -44,7 +44,7 @@ export class StudioChrome {
 
     this.toolbarEl.innerHTML = `
       <div class="tb-group">
-        <button class="brand-chip" id="tb-works-btn" title="我的作品與文件管理">
+        <button class="brand-chip" id="tb-works-btn" title="我的作品與所有檔案管理">
           <span class="brand-logo">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
               <circle cx="12" cy="12" r="3"/><path d="M9.5 10L5.5 6.5M14.5 10L18.5 6.5M9.5 14L5.5 17.5M14.5 14L18.5 17.5"/>
@@ -53,6 +53,7 @@ export class StudioChrome {
           </span>
           <span>MindFlow</span>
         </button>
+        <button class="tb-btn" id="tb-new-doc-btn" title="建立新心智圖檔案 (Alt+N)">📄<span class="tb-label-md">新檔案</span></button>
         <input id="doc-title-input" class="doc-title-input" value="${esc(doc.title)}" title="點擊重新命名文件" />
         <div class="tb-divider"></div>
         <button class="tb-btn icon-only" id="tb-undo" title="復原 (Cmd/Ctrl+Z)" ${store.canUndo() ? '' : 'disabled'}>↶</button>
@@ -88,6 +89,7 @@ export class StudioChrome {
 
     // Bind events
     this.toolbarEl.querySelector('#tb-works-btn').onclick = () => store.toggleLeftDrawer('works');
+    this.toolbarEl.querySelector('#tb-new-doc-btn').onclick = () => this.modals.openNewFile();
     const titleInput = this.toolbarEl.querySelector('#doc-title-input');
     titleInput.onchange = () => store.renameDocument(titleInput.value);
     titleInput.onkeydown = (e) => { if (e.key === 'Enter') titleInput.blur(); };

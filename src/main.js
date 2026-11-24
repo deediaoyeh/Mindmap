@@ -383,6 +383,12 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
+  if (e.altKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    modals.openNewFile();
+    return;
+  }
+
   if (mod && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     store.toggleLeftDrawer('search');
