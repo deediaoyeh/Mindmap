@@ -33,7 +33,8 @@ export class OutlinerView {
       const indentPx = depth * 24;
 
       rowsHtml.push(`
-        <div class="outliner-row depth-${Math.min(depth, 3)}${isSelected ? ' selected' : ''}" data-oid="${node.id}" style="margin-left:${indentPx}px;${hiddenByFilter ? 'opacity:0.25;' : ''}">
+        <div class="outliner-row depth-${Math.min(depth, 3)}${isSelected ? ' selected' : ''}" data-oid="${node.id}" ${depth > 0 ? 'draggable="true"' : ''} style="margin-left:${indentPx}px;${hiddenByFilter ? 'opacity:0.25;' : ''}">
+          ${depth > 0 ? `<span class="outliner-drag-handle" title="拖曳調整層級與順序">⋮⋮</span>` : `<span style="width:14px;"></span>`}
           <button class="outliner-toggle" data-otoggle="${node.id}" title="收合 / 展開" style="${hasKids ? '' : 'visibility:hidden'}">
             ${node.collapsed ? '▸' : '▾'}
           </button>
@@ -84,6 +85,49 @@ export class OutlinerView {
   _bindEvents() {
     this.container.querySelector('#ol-expand-all')?.addEventListener('click', () => store.setAllCollapsed(false));
     this.container.querySelector('#ol-collapse-all')?.addEventListener('click', () => store.setAllCollapsed(true));
+
+    // Drag-and-drop re-leveling in Outliner Mode
+    let draggedId = null;
+    const clearDropClasses = () => {
+      this.container.querySelectorAll('.drop-before, .drop-after, .drop-inside').forEach(el => {
+        el.classList.remove('drop-before', 'drop-after', 'drop-inside');
+      });
+    };
+    this.container.querySelectorAll('.outliner-row').forEach(row => {
+      const rowId = row.dataset.oid;
+      row.addEventListener('dragstart', (e) => {
+        if (row.getAttribute('draggable') !== 'true') return;
+        draggedId = rowId;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', rowId);
+        row.style.opacity = '0.45';
+      });
+      row.addEventListener('dragend', () => {
+        row.style.opacity = '';
+        draggedId = null;
+        clearDropClasses();
+      });
+      row.addEventListener('dragover', (e) => {
+        if (!draggedId || draggedId === rowId || store.isDescendant(draggedId, rowId)) return;
+        e.preventDefault();
+        clearDropClasses();
+        const rect = row.getBoundingClientRect();
+        const relY = (e.clientY - rect.top) / Math.max(1, rect.height);
+        const isRoot = rowId === store.getActiveSheet().root.id;
+        const pos = isRoot ? 'inside' : (relY < 0.28 ? 'before' : relY > 0.72 ? 'after' : 'inside');
+        row.dataset.dropPos = pos;
+        row.classList.add(`drop-${pos}`);
+      });
+      row.addEventListener('drop', (e) => {
+        if (!draggedId || draggedId === rowId) return;
+        e.preventDefault();
+        const pos = row.dataset.dropPos || 'inside';
+        const srcId = draggedId;
+        draggedId = null;
+        clearDropClasses();
+        store.moveNode(srcId, rowId, pos);
+      });
+    });
 
     this.container.querySelectorAll('[data-otoggle]').forEach(btn => {
       btn.addEventListener('click', (e) => {

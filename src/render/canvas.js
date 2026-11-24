@@ -989,6 +989,160 @@ export class MindMapCanvas {
     vr.setAttribute('height', Math.max(20, br.y - tl.y));
   }
 
+  /**
+   * Precision Drag-to-Level evaluator & visual overlay renderer (shared by mouse & touch).
+   * Detects before / after (same-level sibling) vs inside (child next-level) adaptively per layout axis.
+   */
+  _updateNodeDragOverlay(drag, world) {
+    this.layers.overlay.innerHTML = '';
+    const srcItem = this.layout?.nodeMap.get(drag.id);
+    if (!srcItem) return;
+
+    // 1. Translucent ghost card following cursor with node title
+    const gx = world.x - srcItem.w / 2;
+    const gy = world.y - srcItem.h / 2;
+    el('rect', {
+      x: gx, y: gy, width: srcItem.w, height: srcItem.h, rx: 9,
+      fill: 'rgba(79, 70, 229, 0.16)',
+      stroke: '#4f46e5',
+      'stroke-width': 2,
+      'stroke-dasharray': '5 3'
+    }, this.layers.overlay);
+    const gt = el('text', {
+      x: gx + srcItem.w / 2,
+      y: gy + srcItem.h / 2 + 4,
+      'text-anchor': 'middle',
+      fill: '#4f46e5',
+      'font-size': 12,
+      'font-weight': 700
+    }, this.layers.overlay);
+    gt.textContent = srcItem.node.title.slice(0, 16);
+
+    // 2. Find closest valid drop candidate within generous hit radius
+    let bestTarget = null;
+    let bestDist = Infinity;
+    for (const [nid, cand] of this.layout.nodeMap.entries()) {
+      if (nid === drag.id || store.isDescendant(drag.id, nid)) continue;
+      const padX = 28;
+      const padY = 22;
+      if (
+        world.x >= cand.x - padX &&
+        world.x <= cand.x + cand.w + padX &&
+        world.y >= cand.y - padY &&
+        world.y <= cand.y + cand.h + padY
+      ) {
+        const d = Math.hypot(world.x - (cand.x + cand.w / 2), world.y - (cand.y + cand.h / 2));
+        if (d < bestDist) {
+          bestDist = d;
+          bestTarget = cand;
+        }
+      }
+    }
+
+    this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+
+    if (!bestTarget) {
+      drag.targetId = null;
+      drag.dropPos = null;
+      drag.dropSide = null;
+      this.canvasBanner.classList.remove('hidden');
+      if (drag.depth === 1) {
+        this.canvasBanner.innerHTML = `<span>✨ 拖曳至空白處放開可<b>自由定位主要分支</b>；移至其他節點上可調整層級</span>`;
+      } else {
+        this.canvasBanner.innerHTML = `<span>🎯 請將節點拖移至目標節點的<b>上方／下方（同層）</b>或<b>中央／外側（子層）</b>以放置於指定層級</span>`;
+      }
+      return;
+    }
+
+    const rootId = store.getActiveSheet().root.id;
+    const isRootTarget = bestTarget.id === rootId;
+    const isVertDown = bestTarget.layoutAxis === 'vertical-down';
+
+    let dropPos = 'inside';
+    let dropSide = null;
+
+    if (isRootTarget) {
+      dropPos = 'inside';
+      dropSide = world.x < (bestTarget.x + bestTarget.w / 2) ? 'left' : 'right';
+    } else if (isVertDown) {
+      const relX = (world.x - bestTarget.x) / Math.max(1, bestTarget.w);
+      if (relX < 0.25) dropPos = 'before';
+      else if (relX > 0.75) dropPos = 'after';
+      else dropPos = 'inside';
+    } else {
+      const relY = (world.y - bestTarget.y) / Math.max(1, bestTarget.h);
+      if (relY < 0.26) dropPos = 'before';
+      else if (relY > 0.74) dropPos = 'after';
+      else dropPos = 'inside';
+    }
+
+    drag.targetId = bestTarget.id;
+    drag.dropPos = dropPos;
+    drag.dropSide = dropSide;
+
+    this.layers.nodes.querySelector(`[data-node-id="${bestTarget.id}"]`)?.classList.add('drop-target');
+
+    const titleShort = bestTarget.node.title.slice(0, 18);
+    const tierName = (d) => (d <= 1 ? '第 1 層・主主題' : d === 2 ? '第 2 層・子主題' : `第 ${d} 層・分子題`);
+
+    if (dropPos === 'inside') {
+      // Draw indigo child preview slot + dashed preview connector
+      const nextDepth = bestTarget.depth + 1;
+      const dir = isRootTarget ? (dropSide === 'left' ? -1 : 1) : (bestTarget.dir === -1 ? -1 : 1);
+      const pw = 88;
+      const ph = 28;
+      const px = isVertDown
+        ? bestTarget.x + bestTarget.w / 2 - pw / 2
+        : (dir === 1 ? bestTarget.x + bestTarget.w + 34 : bestTarget.x - 34 - pw);
+      const py = isVertDown
+        ? bestTarget.y + bestTarget.h + 28
+        : bestTarget.y + bestTarget.h / 2 - ph / 2;
+
+      const fx = isVertDown ? bestTarget.x + bestTarget.w / 2 : (dir === 1 ? bestTarget.x + bestTarget.w : bestTarget.x);
+      const fy = isVertDown ? bestTarget.y + bestTarget.h : bestTarget.y + bestTarget.h / 2;
+      const tx = isVertDown ? px + pw / 2 : (dir === 1 ? px : px + pw);
+      const ty = isVertDown ? py : py + ph / 2;
+
+      el('path', {
+        d: `M ${fx} ${fy} L ${tx} ${ty}`,
+        fill: 'none', stroke: '#4f46e5', 'stroke-width': 2.5, 'stroke-dasharray': '5 3'
+      }, this.layers.overlay);
+      el('rect', {
+        x: px, y: py, width: pw, height: ph, rx: 7,
+        fill: 'rgba(79, 70, 229, 0.18)', stroke: '#4f46e5', 'stroke-width': 2
+      }, this.layers.overlay);
+      const pt = el('text', {
+        x: px + pw / 2, y: py + 18, 'text-anchor': 'middle', fill: '#4f46e5', 'font-size': 11, 'font-weight': 700
+      }, this.layers.overlay);
+      pt.textContent = `放入子層 (L${nextDepth})`;
+
+      this.canvasBanner.classList.remove('hidden');
+      this.canvasBanner.innerHTML = `<span>🎯 放開以成為「<b>${titleShort}</b>」的子節點（${tierName(nextDepth)}）</span>`;
+    } else {
+      // Draw bright emerald insertion bar for same-level sibling (before / after)
+      const isBefore = dropPos === 'before';
+      if (isVertDown) {
+        const bx = isBefore ? bestTarget.x - 10 : bestTarget.x + bestTarget.w + 10;
+        const y1 = bestTarget.y - 6;
+        const y2 = bestTarget.y + bestTarget.h + 6;
+        el('line', { x1: bx, y1, x2: bx, y2, stroke: '#10b981', 'stroke-width': 4, 'stroke-linecap': 'round' }, this.layers.overlay);
+        el('circle', { cx: bx, cy: y1, r: 4.5, fill: '#10b981' }, this.layers.overlay);
+        el('circle', { cx: bx, cy: y2, r: 4.5, fill: '#10b981' }, this.layers.overlay);
+      } else {
+        const by = isBefore ? bestTarget.y - 8 : bestTarget.y + bestTarget.h + 8;
+        const x1 = bestTarget.x - 4;
+        const x2 = bestTarget.x + bestTarget.w + 4;
+        el('line', { x1, y1: by, x2, y2: by, stroke: '#10b981', 'stroke-width': 4, 'stroke-linecap': 'round' }, this.layers.overlay);
+        el('circle', { cx: x1, cy: by, r: 4.5, fill: '#10b981' }, this.layers.overlay);
+        el('circle', { cx: x2, cy: by, r: 4.5, fill: '#10b981' }, this.layers.overlay);
+      }
+
+      const dirLabel = isVertDown ? (isBefore ? '左側' : '右側') : (isBefore ? '上方' : '下方');
+      this.canvasBanner.classList.remove('hidden');
+      this.canvasBanner.innerHTML = `<span>${isBefore ? '⬆️' : '⬇️'} 放開以置於「<b>${titleShort}</b>」${dirLabel}（同層・${tierName(bestTarget.depth)}）</span>`;
+    }
+  }
+
   _bindEvents() {
     // Inline editor events
     this.inlineEditor.addEventListener('input', () => this._autoResizeInline());
@@ -1271,51 +1425,7 @@ export class MindMapCanvas {
         this.draggingNode.moved = true;
 
         const world = this.screenToWorld(e.clientX, e.clientY);
-        this.layers.overlay.innerHTML = '';
-
-        // Draw translucent drag ghost
-        const item = this.layout.nodeMap.get(this.draggingNode.id);
-        el('rect', {
-          x: world.x - item.w / 2,
-          y: world.y - item.h / 2,
-          width: item.w,
-          height: item.h,
-          rx: 8,
-          fill: 'rgba(79, 70, 229, 0.18)',
-          stroke: '#4f46e5',
-          'stroke-width': 2,
-          'stroke-dasharray': '5 3'
-        }, this.layers.overlay);
-
-        // Hit-test drop targets
-        let bestTarget = null;
-        for (const [nid, candidate] of this.layout.nodeMap.entries()) {
-          if (nid === this.draggingNode.id) continue;
-          if (store.isDescendant(this.draggingNode.id, nid)) continue;
-          if (
-            world.x >= candidate.x - 16 &&
-            world.x <= candidate.x + candidate.w + 16 &&
-            world.y >= candidate.y - 12 &&
-            world.y <= candidate.y + candidate.h + 12
-          ) {
-            bestTarget = candidate;
-            break;
-          }
-        }
-
-        // Highlight target
-        this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
-        if (bestTarget) {
-          this.draggingNode.targetId = bestTarget.id;
-          const relY = (world.y - bestTarget.y) / bestTarget.h;
-          this.draggingNode.dropPos = (bestTarget.id === store.getActiveSheet().root.id)
-            ? 'inside'
-            : (relY < 0.25 ? 'before' : relY > 0.75 ? 'after' : 'inside');
-          const elTarget = this.layers.nodes.querySelector(`[data-node-id="${bestTarget.id}"]`);
-          if (elTarget) elTarget.classList.add('drop-target');
-        } else {
-          this.draggingNode.targetId = null;
-        }
+        this._updateNodeDragOverlay(this.draggingNode, world);
       }
     });
 
@@ -1335,10 +1445,11 @@ export class MindMapCanvas {
         this.draggingNode = null;
         this.layers.overlay.innerHTML = '';
         this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+        this._renderBanner();
 
         if (drag.moved) {
           if (drag.targetId) {
-            store.moveNode(drag.id, drag.targetId, drag.dropPos || 'inside');
+            store.moveNode(drag.id, drag.targetId, drag.dropPos || 'inside', drag.dropSide || null);
           } else if (drag.floatingId) {
             const world = this.screenToWorld(e.clientX, e.clientY);
             store.moveFloatingTopic(drag.floatingId, world.x - 40, world.y);
@@ -1575,35 +1686,7 @@ export class MindMapCanvas {
       } else if (touchMode === 'node-drag' && this.draggingNode) {
         e.preventDefault();
         const world = this.screenToWorld(t.clientX, t.clientY);
-        this.layers.overlay.innerHTML = '';
-        const item = this.layout.nodeMap.get(this.draggingNode.id);
-        if (item) {
-          el('rect', {
-            x: world.x - item.w / 2,
-            y: world.y - item.h / 2,
-            width: item.w,
-            height: item.h,
-            rx: 8,
-            fill: 'rgba(79, 70, 229, 0.2)',
-            stroke: '#4f46e5',
-            'stroke-width': 2.5,
-            'stroke-dasharray': '5 3'
-          }, this.layers.overlay);
-        }
-        let bestTarget = null;
-        for (const [nid, cand] of this.layout.nodeMap.entries()) {
-          if (nid === this.draggingNode.id || store.isDescendant(this.draggingNode.id, nid)) continue;
-          if (world.x >= cand.x - 18 && world.x <= cand.x + cand.w + 18 && world.y >= cand.y - 14 && world.y <= cand.y + cand.h + 14) {
-            bestTarget = cand;
-            break;
-          }
-        }
-        this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
-        this.draggingNode.targetId = bestTarget ? bestTarget.id : null;
-        this.draggingNode.dropPos = 'inside';
-        if (bestTarget) {
-          this.layers.nodes.querySelector(`[data-node-id="${bestTarget.id}"]`)?.classList.add('drop-target');
-        }
+        this._updateNodeDragOverlay(this.draggingNode, world);
       }
     }, { passive: false });
 
@@ -1614,8 +1697,9 @@ export class MindMapCanvas {
         this.draggingNode = null;
         this.layers.overlay.innerHTML = '';
         this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+        this._renderBanner();
         if (drag.targetId) {
-          store.moveNode(drag.id, drag.targetId, drag.dropPos || 'inside');
+          store.moveNode(drag.id, drag.targetId, drag.dropPos || 'inside', drag.dropSide || null);
         } else if (drag.floatingId && e.changedTouches?.[0]) {
           const world = this.screenToWorld(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
           store.moveFloatingTopic(drag.floatingId, world.x - 40, world.y);

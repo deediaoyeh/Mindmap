@@ -479,7 +479,7 @@ class MindFlowStore {
     }, 'style');
   }
 
-  moveNode(sourceId, targetId, position = 'inside') {
+  moveNode(sourceId, targetId, position = 'inside', sideOverride = null) {
     if (!sourceId || !targetId || sourceId === targetId) return false;
     const sheet = this.getActiveSheet();
     if (sourceId === sheet.root.id) return false;
@@ -490,7 +490,8 @@ class MindFlowStore {
       const tgt = this.findNodeWithParent(targetId, s);
       if (!src || !tgt) return;
 
-      // Detach source
+      // Detach source and clear any previous free-positioning offset
+      delete src.node.customOffset;
       if (src.parent) {
         src.parent.children.splice(src.index, 1);
       } else if (src.floatingObj) {
@@ -503,13 +504,15 @@ class MindFlowStore {
 
       if (position === 'inside' || !tgt2.parent) {
         tgt2.node.collapsed = false;
-        if (tgt2.node.id === s.root.id && !src.node.side) {
-          src.node.side = 'right';
+        if (tgt2.node.id === s.root.id) {
+          src.node.side = sideOverride || src.node.side || 'right';
+        } else {
+          src.node.side = tgt2.node.side || null;
         }
         tgt2.node.children.push(src.node);
       } else {
         const insertIdx = position === 'before' ? tgt2.index : tgt2.index + 1;
-        src.node.side = tgt2.node.side || src.node.side;
+        src.node.side = sideOverride || tgt2.node.side || src.node.side;
         tgt2.parent.children.splice(insertIdx, 0, src.node);
       }
     }, 'tree');
