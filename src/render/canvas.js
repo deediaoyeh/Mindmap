@@ -764,6 +764,12 @@ export class MindMapCanvas {
       this._autoResizeInline();
       this.inlineEditor.focus();
       this.inlineEditor.select();
+      requestAnimationFrame(() => {
+        if (store.editingNodeId === id) {
+          this.inlineEditor.focus();
+          this.inlineEditor.select();
+        }
+      });
     }
   }
 
@@ -1003,15 +1009,33 @@ export class MindMapCanvas {
         return;
       }
 
-      // Relationship click
+      // Relationship click (with reliable double-click detection across SVG re-renders)
       const relGroup = e.target.closest('.rel-group');
       if (relGroup) {
         e.stopPropagation();
-        store.selectRelationship(relGroup.dataset.relId);
+        const relId = relGroup.dataset.relId;
+        const now = Date.now();
+        if (
+          this._lastClick &&
+          now - this._lastClick.time < 420 &&
+          this._lastClick.relId === relId &&
+          Math.hypot(e.clientX - this._lastClick.x, e.clientY - this._lastClick.y) < 18
+        ) {
+          e.preventDefault();
+          this._lastClick = null;
+          const rel = store.getActiveSheet().relationships.find(r => r.id === relId);
+          if (rel) {
+            const next = prompt('編輯關聯線文字：', rel.label || '');
+            if (next !== null) store.updateRelationship(relId, { label: next });
+          }
+          return;
+        }
+        this._lastClick = { time: now, nodeId: null, relId, x: e.clientX, y: e.clientY };
+        store.selectRelationship(relId);
         return;
       }
 
-      // Node click / start drag
+      // Node click / double-click to edit / start drag
       const nodeGroup = e.target.closest('.node-group');
       if (nodeGroup && e.button === 0) {
         e.stopPropagation();
@@ -1026,6 +1050,21 @@ export class MindMapCanvas {
           }
           return;
         }
+
+        const now = Date.now();
+        if (
+          this._lastClick &&
+          now - this._lastClick.time < 420 &&
+          this._lastClick.nodeId === id &&
+          Math.hypot(e.clientX - this._lastClick.x, e.clientY - this._lastClick.y) < 18
+        ) {
+          e.preventDefault();
+          this._lastClick = null;
+          this.draggingNode = null;
+          store.startEditing(id);
+          return;
+        }
+        this._lastClick = { time: now, nodeId: id, relId: null, x: e.clientX, y: e.clientY };
 
         store.selectNode(id);
 
@@ -1046,6 +1085,7 @@ export class MindMapCanvas {
       }
 
       // Empty background -> pan & deselect
+      this._lastClick = null;
       if (store.connectingFromId) store.setConnectingMode(null);
       store.selectNode(null);
       this.panning = true;
@@ -1053,11 +1093,12 @@ export class MindMapCanvas {
       this.panStart = { x: e.clientX, y: e.clientY, tx: this.tx, ty: this.ty };
     });
 
-    // Double click -> Edit node OR create Floating Topic on blank canvas
+    // Double click -> Fallback edit node OR create Floating Topic on blank canvas
     this.svg.addEventListener('dblclick', (e) => {
       const nodeGroup = e.target.closest('.node-group');
       if (nodeGroup) {
         e.stopPropagation();
+        e.preventDefault();
         store.startEditing(nodeGroup.dataset.nodeId);
         return;
       }
@@ -1194,6 +1235,241 @@ export class MindMapCanvas {
       this.tx = svgRect.width / 2 - wx * this.scale;
       this.ty = svgRect.height / 2 - wy * this.scale;
       this.applyTransform();
+    });
+
+    // =========================================================================
+    // Mobile & Tablet Multi-Touch Support:
+    // - 1-finger pan on background
+    // - 2-finger pinch-to-zoom & pan
+    // - Tap node to select / quick-add / video play / collapse / todo
+    // - Double-tap node to edit text, double-tap blank canvas for Floating Topic
+    // - Long-press node (450ms) to drag & reparent
+    // =========================================================================
+    let touchMode = null; // 'pan' | 'pinch' | 'node-drag'
+    let touchPanStart = null;
+    let pinchStart = null;
+    let lastTap = { time: 0, x: 0, y: 0, nodeId: null };
+    let longPressTimer = null;
+
+    const clearLongPress = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+
+    this.svg.addEventListener('touchstart', (e) => {
+      clearLongPress();
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        touchMode = 'pinch';
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const rect = this.svg.getBoundingClientRect();
+        pinchStart = {
+          dist: Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY) || 1,
+          midX: (t0.clientX + t1.clientX) / 2 - rect.left,
+          midY: (t0.clientY + t1.clientY) / 2 - rect.top,
+          scale: this.scale,
+          tx: this.tx,
+          ty: this.ty
+        };
+        return;
+      }
+
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const target = document.elementFromPoint(t.clientX, t.clientY);
+
+      // Direct interactive SVG controls
+      const videoBtn = target?.closest('.node-video-btn');
+      if (videoBtn) {
+        e.preventDefault();
+        const node = store.findNode(videoBtn.dataset.videoNode);
+        if (node && this.onOpenVideo) this.onOpenVideo(node);
+        return;
+      }
+      const imgBtn = target?.closest('.node-image-btn');
+      if (imgBtn) {
+        e.preventDefault();
+        const node = store.findNode(imgBtn.dataset.imgNode);
+        if (node && this.onOpenImage) this.onOpenImage(node);
+        return;
+      }
+      const attBtn = target?.closest('.node-att-btn');
+      if (attBtn) {
+        e.preventDefault();
+        const node = store.findNode(attBtn.dataset.attNode);
+        if (node && this.onOpenAttachments) this.onOpenAttachments(node);
+        return;
+      }
+      const todoBtn = target?.closest('.todo-toggle');
+      if (todoBtn) {
+        e.preventDefault();
+        const node = store.findNode(todoBtn.dataset.todoId);
+        if (node?.todo) store.updateNode(node.id, { todo: { checked: !node.todo.checked } });
+        return;
+      }
+      const colBtn = target?.closest('.collapse-badge');
+      if (colBtn) {
+        e.preventDefault();
+        store.toggleCollapse(colBtn.dataset.collapseId);
+        return;
+      }
+      const quickAdd = target?.closest('[data-quick-add]');
+      if (quickAdd) {
+        e.preventDefault();
+        store.addChild(quickAdd.dataset.quickAdd);
+        return;
+      }
+
+      const nodeGroup = target?.closest('.node-group');
+      const now = Date.now();
+      const isDoubleTap = (now - lastTap.time < 340) && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 32;
+
+      if (nodeGroup) {
+        e.preventDefault();
+        const id = nodeGroup.dataset.nodeId;
+        const floatingId = nodeGroup.dataset.floatingId || null;
+
+        if (store.connectingFromId) {
+          if (store.connectingFromId !== id) store.addRelationship(store.connectingFromId, id);
+          else store.setConnectingMode(null);
+          return;
+        }
+
+        if (isDoubleTap && lastTap.nodeId === id) {
+          lastTap = { time: 0, x: 0, y: 0, nodeId: null };
+          store.startEditing(id);
+          return;
+        }
+
+        lastTap = { time: now, x: t.clientX, y: t.clientY, nodeId: id };
+        store.selectNode(id, false);
+
+        // Allow 1-finger panning if user drags immediately, OR long-press to reparent
+        touchMode = 'pan';
+        touchPanStart = { x: t.clientX, y: t.clientY, tx: this.tx, ty: this.ty };
+
+        if (id !== store.getActiveSheet().root.id) {
+          longPressTimer = setTimeout(() => {
+            const item = this.layout?.nodeMap.get(id);
+            if (!item) return;
+            touchMode = 'node-drag';
+            this.draggingNode = {
+              id,
+              floatingId,
+              startClientX: t.clientX,
+              startClientY: t.clientY,
+              origX: item.x,
+              origY: item.y,
+              moved: true,
+              targetId: null
+            };
+            if (navigator.vibrate) navigator.vibrate(25);
+          }, 420);
+        }
+        return;
+      }
+
+      // Blank canvas touch
+      e.preventDefault();
+      if (isDoubleTap && !lastTap.nodeId) {
+        lastTap = { time: 0, x: 0, y: 0, nodeId: null };
+        const world = this.screenToWorld(t.clientX, t.clientY);
+        store.addFloatingTopic(world.x - 50, world.y);
+        return;
+      }
+      lastTap = { time: now, x: t.clientX, y: t.clientY, nodeId: null };
+      if (store.connectingFromId) store.setConnectingMode(null);
+      store.selectNode(null, false);
+      touchMode = 'pan';
+      touchPanStart = { x: t.clientX, y: t.clientY, tx: this.tx, ty: this.ty };
+    }, { passive: false });
+
+    this.svg.addEventListener('touchmove', (e) => {
+      if (touchMode === 'pinch' && e.touches.length === 2 && pinchStart) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const rect = this.svg.getBoundingClientRect();
+        const curDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY) || 1;
+        const curMidX = (t0.clientX + t1.clientX) / 2 - rect.left;
+        const curMidY = (t0.clientY + t1.clientY) / 2 - rect.top;
+        const nextScale = Math.max(0.15, Math.min(3.0, pinchStart.scale * (curDist / pinchStart.dist)));
+        const ratio = nextScale / pinchStart.scale;
+        this.scale = nextScale;
+        this.tx = curMidX - (pinchStart.midX - pinchStart.tx) * ratio;
+        this.ty = curMidY - (pinchStart.midY - pinchStart.ty) * ratio;
+        this.applyTransform();
+        return;
+      }
+
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+
+      if (touchMode === 'pan' && touchPanStart) {
+        const dx = t.clientX - touchPanStart.x;
+        const dy = t.clientY - touchPanStart.y;
+        if (Math.hypot(dx, dy) > 8) clearLongPress();
+        e.preventDefault();
+        this.tx = touchPanStart.tx + dx;
+        this.ty = touchPanStart.ty + dy;
+        this.applyTransform();
+      } else if (touchMode === 'node-drag' && this.draggingNode) {
+        e.preventDefault();
+        const world = this.screenToWorld(t.clientX, t.clientY);
+        this.layers.overlay.innerHTML = '';
+        const item = this.layout.nodeMap.get(this.draggingNode.id);
+        if (item) {
+          el('rect', {
+            x: world.x - item.w / 2,
+            y: world.y - item.h / 2,
+            width: item.w,
+            height: item.h,
+            rx: 8,
+            fill: 'rgba(79, 70, 229, 0.2)',
+            stroke: '#4f46e5',
+            'stroke-width': 2.5,
+            'stroke-dasharray': '5 3'
+          }, this.layers.overlay);
+        }
+        let bestTarget = null;
+        for (const [nid, cand] of this.layout.nodeMap.entries()) {
+          if (nid === this.draggingNode.id || store.isDescendant(this.draggingNode.id, nid)) continue;
+          if (world.x >= cand.x - 18 && world.x <= cand.x + cand.w + 18 && world.y >= cand.y - 14 && world.y <= cand.y + cand.h + 14) {
+            bestTarget = cand;
+            break;
+          }
+        }
+        this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+        this.draggingNode.targetId = bestTarget ? bestTarget.id : null;
+        this.draggingNode.dropPos = 'inside';
+        if (bestTarget) {
+          this.layers.nodes.querySelector(`[data-node-id="${bestTarget.id}"]`)?.classList.add('drop-target');
+        }
+      }
+    }, { passive: false });
+
+    this.svg.addEventListener('touchend', (e) => {
+      clearLongPress();
+      if (touchMode === 'node-drag' && this.draggingNode) {
+        const drag = this.draggingNode;
+        this.draggingNode = null;
+        this.layers.overlay.innerHTML = '';
+        this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+        if (drag.targetId) {
+          store.moveNode(drag.id, drag.targetId, drag.dropPos || 'inside');
+        } else if (drag.floatingId && e.changedTouches?.[0]) {
+          const world = this.screenToWorld(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+          store.moveFloatingTopic(drag.floatingId, world.x - 40, world.y);
+        }
+      }
+      if (e.touches.length === 0) {
+        touchMode = null;
+        touchPanStart = null;
+        pinchStart = null;
+      }
     });
   }
 }

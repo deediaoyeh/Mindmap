@@ -265,3 +265,8 @@ window.addEventListener('resize', () => {
 // First Render + Check Incoming Hash
 syncViews('init');
 handleIncomingHash();
+
+// Register Offline PWA Service Worker (enables mobile/tablet Add-to-Home-Screen & offline caching)
+if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}

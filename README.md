@@ -44,6 +44,13 @@
 - **跨軟體互通**：零依賴純前端 ZIP 引擎，支援標準 **`.xmind` 檔案雙向讀寫**，以及 Markdown、OPML、FreeMind (`.mm`)、JSON、CSV、ICS。
 - **免後端分享連結**：將畫布以 Deflate 壓縮進 URL Hash（`#map=...`），在 GitHub Pages 上不需任何後端伺服器即可分享！
 
+### 6. 全平台支援：手機／平板觸控 PWA ＋ Mac / Windows 離線安裝版
+- **手機與平板瀏覽器最佳化（iOS / iPadOS / Android）**：
+  - 完整多點觸控手勢：單指拖曳平移、雙指捏合縮放、雙擊編輯文字、空白處雙擊建立自由主題、長按節點拖曳調整父子層級。
+  - 自適應行動介面與底部浮動工具列，支援 **PWA（加入主畫面）** 離線運作。
+- **macOS 獨立離線版（`.dmg`）**：原碼位於 `macos/`，採用原生 Swift + WKWebView + 內建本機離線伺服器打包，雙擊 `MindFlow-macOS.dmg` 拖曳至「應用程式」即可 100% 離線使用。
+- **Windows 獨立安裝版（`.exe` / 攜帶版 `.zip`）**：原碼位於 `windows/`，採用 .NET 8 + WebView2 + Inno Setup 打包為獨立安裝精靈 `MindFlow-Windows-Setup.exe`，透過 GitHub Actions 自動建置並發布於 [GitHub Releases](https://github.com/deediaoyeh/Mindmap/releases)。
+
 ---
 
 ## 本機啟動

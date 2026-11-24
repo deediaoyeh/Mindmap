@@ -27,7 +27,7 @@ class MindFlowStore {
     this.editingNodeId = null;
     this.viewMode = 'canvas'; // 'canvas' | 'outliner' | 'gantt'
     this.inspectorTab = 'map'; // 'map' | 'topic'
-    this.inspectorOpen = true;
+    this.inspectorOpen = typeof window !== 'undefined' ? window.innerWidth > 900 : true;
     this.leftDrawer = null; // null | 'works' | 'search'
     this.showMinimap = false;
     this.zenMode = false;

@@ -1,0 +1,105 @@
+name: Build & Release Desktop Installers (macOS DMG & Windows Setup)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build macOS offline .app & .dmg
+        run: |
+          chmod +x macos/build_dmg.sh
+          bash macos/build_dmg.sh
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MindFlow-macOS-dmg
+          path: dist/MindFlow-macOS.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Generate MindFlow.ico
+        shell: pwsh
+        run: python windows/make_ico.py windows/MindFlow.ico
+
+      - name: Publish standalone Windows app
+        shell: pwsh
+        run: |
+          dotnet publish windows/MindFlow.csproj -c Release -r win-x64 --self-contained true -o windows/publish
+          Copy-Item windows/MindFlow.ico windows/publish/MindFlow.ico
+          New-Item -ItemType Directory -Force -Path windows/publish/web | Out-Null
+          Copy-Item index.html windows/publish/web/
+          Copy-Item manifest.webmanifest windows/publish/web/
+          Copy-Item sw.js windows/publish/web/
+          Copy-Item -Recurse styles windows/publish/web/styles
+          Copy-Item -Recurse src windows/publish/web/src
+          Copy-Item -Recurse docs windows/publish/web/docs
+
+      - name: Create Windows Portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path windows/publish/* -DestinationPath dist/MindFlow-Windows-Portable.zip -Force
+
+      - name: Compile Windows Standalone Installer (.exe) via Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y
+          }
+          & $iscc windows/installer.iss
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MindFlow-Windows-installers
+          path: |
+            dist/MindFlow-Windows-Setup.exe
+            dist/MindFlow-Windows-Portable.zip
+
+  publish-release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.1.0' }}
+          name: MindFlow Desktop Offline Installers (macOS & Windows)
+          body: |
+            ## MindFlow 離線桌面版安裝檔
+
+            - **macOS 離線安裝檔**：`MindFlow-macOS.dmg`（拖曳至「應用程式」資料夾即可離線執行）
+            - **Windows 獨立安裝檔**：`MindFlow-Windows-Setup.exe`（安裝精靈＋桌面／開始選單捷徑＋完整移除程式）
+            - **Windows 免安裝攜帶版**：`MindFlow-Windows-Portable.zip`（解壓後直接雙擊 `MindFlow.exe`）
+            - **線上／手機與平板 PWA 版**：https://deediaoyeh.github.io/Mindmap/
+          files: |
+            artifacts/MindFlow-macOS-dmg/MindFlow-macOS.dmg
+            artifacts/MindFlow-Windows-installers/MindFlow-Windows-Setup.exe
+            artifacts/MindFlow-Windows-installers/MindFlow-Windows-Portable.zip
