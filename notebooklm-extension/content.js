@@ -5,7 +5,7 @@
  */
 
 (function () {
-  const DEFAULT_APP_URL = 'https://deediao.github.io/Mindmap/';
+  const DEFAULT_APP_URL = 'https://deediaoyeh.github.io/Mindmap/';
 
   function collectAllElements(root, selector) {
     const res = [];

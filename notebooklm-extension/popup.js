@@ -2,7 +2,7 @@ const urlInput = document.getElementById('url-input');
 const statusEl = document.getElementById('status');
 
 chrome.storage.sync.get(['mindflowUrl'], (res) => {
-  urlInput.value = res.mindflowUrl || 'https://deediao.github.io/Mindmap/';
+  urlInput.value = res.mindflowUrl || 'https://deediaoyeh.github.io/Mindmap/';
 });
 
 urlInput.addEventListener('change', () => {

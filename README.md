@@ -1,5 +1,7 @@
 # MindFlow — 開源線上心智圖平台 & Google NotebookLM 橋接工具
 
+🌐 **線上正式網址（GitHub Pages）**：https://deediaoyeh.github.io/Mindmap/
+
 **MindFlow** 是一個受 **XMind** 深度啟發、**零建置依賴（Zero-Build Pure ES Modules）**、原生可架設於 **GitHub Pages** 的完整線上心智圖平台，並內建專為 **Google NotebookLM（Gemini Notebook）** 打造的心智圖無損匯入橋接系統。
 
 > 📘 完整 XMind 實地觀察與架構對照報告請參閱：[docs/XMIND_ANALYSIS.md](./docs/XMIND_ANALYSIS.md)
