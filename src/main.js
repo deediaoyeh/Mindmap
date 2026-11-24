@@ -5,6 +5,13 @@
  */
 
 import { gdrive } from './core/gdrive.js';
+import {
+  extractVideoMetadata,
+  parseVideoUrl,
+  readImageAsDataUrl,
+  saveMediaBlob
+} from './core/mediaDb.js';
+import { uid } from './core/schema.js';
 import { store } from './core/store.js';
 import { decompressStringFromUrl } from './core/zip.js';
 import { importFromFile } from './importers/formats.js';
@@ -111,32 +118,246 @@ globalFileInput.addEventListener('change', async () => {
   }
 });
 
-// Global Drag-and-Drop onto Workspace
-window.addEventListener('dragover', (e) => {
-  if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
-});
-window.addEventListener('drop', async (e) => {
-  if (!e.dataTransfer?.files?.length) return;
-  // Let modal dropzones handle their own drops
+// =========================================================================
+// Direct Drag-and-Drop Content onto Canvas or Specific Nodes:
+// Supports Images, Videos (auto thumbnail + play), File Attachments,
+// MindMap files (.xmind/.mm/.opml/.md/.json/.svg), URLs (YouTube/Drive/Web), and Text!
+// =========================================================================
+const MINDMAP_IMPORT_EXTS = new Set(['xmind', 'mm', 'opml', 'md', 'markdown', 'json', 'svg', 'canvas']);
+let dragCounter = 0;
+
+function hasDroppablePayload(dt) {
+  if (!dt) return false;
+  const types = Array.from(dt.types || []);
+  return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain');
+}
+
+window.addEventListener('dragenter', (e) => {
   if (e.target.closest('.modal-root')) return;
+  if (hasDroppablePayload(e.dataTransfer)) dragCounter++;
+});
+
+window.addEventListener('dragover', (e) => {
+  if (e.target.closest('.modal-root')) return;
+  if (!hasDroppablePayload(e.dataTransfer)) return;
   e.preventDefault();
-  const file = e.dataTransfer.files[0];
-  if (file.type.startsWith('image/')) {
-    modals.openNotebookLM('png');
-    showToast('偵測到圖片檔，已為您開啟 PNG AI 還原工具！');
+  if (store.viewMode === 'canvas') {
+    const hit = canvas.hitTestNodeAtScreen(e.clientX, e.clientY);
+    canvas.setExternalDropFeedback(hit, true);
+  }
+});
+
+window.addEventListener('dragleave', (e) => {
+  if (e.target.closest('.modal-root')) return;
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) canvas.setExternalDropFeedback(null, false);
+});
+
+window.addEventListener('drop', async (e) => {
+  dragCounter = 0;
+  canvas.setExternalDropFeedback(null, false);
+  if (e.target.closest('.modal-root')) return;
+  if (!hasDroppablePayload(e.dataTransfer)) return;
+  e.preventDefault();
+
+  const hitItem = store.viewMode === 'canvas' ? canvas.hitTestNodeAtScreen(e.clientX, e.clientY) : null;
+  const dropWorld = store.viewMode === 'canvas' ? canvas.screenToWorld(e.clientX, e.clientY) : { x: 260, y: 120 };
+  const files = Array.from(e.dataTransfer.files || []);
+
+  // --- 1. File Drops (Images, Videos, Attachments, or Full MindMap Imports) ---
+  if (files.length > 0) {
+    // Single MindMap document dropped on blank canvas -> import full mind map sheet
+    if (!hitItem && files.length === 1) {
+      const ext = (files[0].name.split('.').pop() || '').toLowerCase();
+      if (MINDMAP_IMPORT_EXTS.has(ext)) {
+        try {
+          const parsed = await importFromFile(files[0]);
+          store.importAsSheetOrDoc(parsed.root, {
+            title: parsed.title,
+            sheets: parsed.sheets,
+            structure: 'logic-right',
+            themeId: 'notebooklm-clean'
+          });
+          showToast(`已匯入心智圖「${parsed.title}」`, 'success');
+          return;
+        } catch (err) {
+          showToast(`匯入失敗：${err.message}`, 'error', 4000);
+          return;
+        }
+      }
+    }
+
+    // Target existing hovered node, or create a new Floating Topic right where dropped!
+    let targetNodeId = hitItem?.id;
+    if (!targetNodeId) {
+      const baseTitle = files[0].name.replace(/\.[^.]+$/, '') || '拖曳內容';
+      const created = store.addFloatingTopic(dropWorld.x - 60, dropWorld.y, baseTitle);
+      store.stopEditing();
+      targetNodeId = created.id;
+    }
+
+    let imgCount = 0;
+    let vidCount = 0;
+    let attCount = 0;
+    const newAttachments = [];
+
+    for (const file of files) {
+      const node = store.findNode(targetNodeId);
+      if (!node) break;
+
+      if (file.type.startsWith('image/')) {
+        try {
+          const dataUrl = await readImageAsDataUrl(file, 960);
+          if (!node.image) {
+            store.updateNode(targetNodeId, { image: dataUrl });
+          } else {
+            // Multiple images -> create child topic with image so none are overwritten!
+            const child = store.addChild(targetNodeId, file.name.replace(/\.[^.]+$/, ''), false);
+            if (child) store.updateNode(child.id, { image: dataUrl });
+          }
+          if (gdrive.isConnected()) {
+            gdrive.uploadNodeMedia(store.getActiveDoc(), file).catch(() => {});
+          }
+          imgCount++;
+        } catch (err) {
+          showToast(`圖片處理失敗：${err.message}`, 'error');
+        }
+      } else if (file.type.startsWith('video/')) {
+        try {
+          showToast(`正在擷取影片縮圖：${file.name}...`);
+          const blobId = uid('vid');
+          await saveMediaBlob(blobId, file, { name: file.name, mimeType: file.type });
+          const meta = await extractVideoMetadata(file);
+          const videoObj = {
+            sourceType: 'local',
+            name: file.name,
+            mimeType: file.type || 'video/mp4',
+            size: file.size,
+            localBlobId: blobId,
+            thumbnail: meta.thumbnail,
+            duration: meta.duration
+          };
+          if (gdrive.isConnected()) {
+            try {
+              const up = await gdrive.uploadNodeMedia(store.getActiveDoc(), file);
+              videoObj.driveFileId = up.driveFileId;
+              videoObj.driveWebViewLink = up.driveWebViewLink;
+              videoObj.embedUrl = `https://drive.google.com/file/d/${up.driveFileId}/preview`;
+            } catch {}
+          }
+          if (!node.video) {
+            store.updateNode(targetNodeId, { video: videoObj });
+          } else {
+            const child = store.addChild(targetNodeId, file.name.replace(/\.[^.]+$/, ''), false);
+            if (child) store.updateNode(child.id, { video: videoObj });
+          }
+          vidCount++;
+        } catch (err) {
+          showToast(`影片處理失敗：${err.message}`, 'error');
+        }
+      } else {
+        // Generic file attachment (PDF, Office, ZIP, Audio, etc.)
+        const blobId = uid('att');
+        await saveMediaBlob(blobId, file, { name: file.name, mimeType: file.type });
+        const att = {
+          id: uid('f'),
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          localBlobId: blobId,
+          uploadedAt: new Date().toISOString()
+        };
+        if (gdrive.isConnected()) {
+          try {
+            const up = await gdrive.uploadNodeMedia(store.getActiveDoc(), file);
+            att.driveFileId = up.driveFileId;
+            att.driveWebViewLink = up.driveWebViewLink;
+          } catch {}
+        }
+        newAttachments.push(att);
+        attCount++;
+      }
+    }
+
+    if (newAttachments.length > 0) {
+      const node = store.findNode(targetNodeId);
+      if (node) {
+        store.updateNode(targetNodeId, { attachments: [...(node.attachments || []), ...newAttachments] });
+      }
+    }
+
+    store.selectNode(targetNodeId);
+    const summary = [
+      imgCount ? `${imgCount} 張圖片` : '',
+      vidCount ? `${vidCount} 部影片` : '',
+      attCount ? `${attCount} 個附加檔案` : ''
+    ].filter(Boolean).join('、');
+    if (summary) showToast(`📥 已拖曳加入 ${summary}！`, 'success');
     return;
   }
-  try {
-    const parsed = await importFromFile(file);
-    store.importAsSheetOrDoc(parsed.root, {
-      title: parsed.title,
-      sheets: parsed.sheets,
-      structure: 'logic-right',
-      themeId: 'notebooklm-clean'
-    });
-    showToast(`已匯入「${parsed.title}」`, 'success');
-  } catch (err) {
-    showToast(`無法匯入該檔案：${err.message}`, 'error', 4000);
+
+  // --- 2. URL or Text Drops (from browser tabs, notes, or documents) ---
+  const uriText = (e.dataTransfer.getData('text/uri-list') || '').split('\n').find(l => l.trim() && !l.startsWith('#')) || '';
+  const plainText = (e.dataTransfer.getData('text/plain') || '').trim();
+  const droppedStr = (uriText || plainText).trim();
+  if (!droppedStr) return;
+
+  const isUrl = /^https?:\/\/\S+$/i.test(droppedStr);
+  if (isUrl) {
+    const isImageUrl = /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(droppedStr);
+    const parsedVideo = parseVideoUrl(droppedStr);
+    const isVideoUrl = parsedVideo && (
+      parsedVideo.sourceType === 'youtube' ||
+      parsedVideo.sourceType === 'gdrive' ||
+      /\.(mp4|webm|mov)(\?.*)?$/i.test(droppedStr)
+    );
+
+    let targetId = hitItem?.id;
+    if (!targetId) {
+      const label = isVideoUrl ? parsedVideo.title : isImageUrl ? '拖曳圖片' : new URL(droppedStr).hostname;
+      const created = store.addFloatingTopic(dropWorld.x - 60, dropWorld.y, label);
+      store.stopEditing();
+      targetId = created.id;
+    }
+
+    if (isVideoUrl) {
+      store.updateNode(targetId, { video: parsedVideo });
+      showToast('📥 已拖曳加入影片縮圖與播放按鈕！', 'success');
+    } else if (isImageUrl) {
+      store.updateNode(targetId, { image: droppedStr });
+      showToast('📥 已拖曳加入圖片！', 'success');
+    } else {
+      const node = store.findNode(targetId);
+      if (node && !node.link) {
+        store.updateNode(targetId, { link: droppedStr });
+      } else {
+        const child = store.addChild(targetId, new URL(droppedStr).hostname, false);
+        if (child) store.updateNode(child.id, { link: droppedStr });
+      }
+      showToast('📥 已拖曳加入網頁連結！', 'success');
+    }
+    store.selectNode(targetId);
+    return;
+  }
+
+  // Plain text drop (single or multi-line -> child topics or floating topic)
+  const lines = droppedStr.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return;
+
+  if (hitItem) {
+    for (const line of lines.slice(0, 20)) {
+      store.addChild(hitItem.id, line.slice(0, 120), false);
+    }
+    store.selectNode(hitItem.id);
+    showToast(`📥 已拖曳新增 ${Math.min(lines.length, 20)} 個子主題！`, 'success');
+  } else {
+    const created = store.addFloatingTopic(dropWorld.x - 60, dropWorld.y, lines[0].slice(0, 120));
+    store.stopEditing();
+    for (const line of lines.slice(1, 20)) {
+      store.addChild(created.id, line.slice(0, 120), false);
+    }
+    store.selectNode(created.id);
+    showToast('📥 已在畫布建立拖曳文字主題！', 'success');
   }
 });
 

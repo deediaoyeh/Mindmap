@@ -125,6 +125,42 @@ export class MindMapCanvas {
     this.applyTransform();
   }
 
+  hitTestNodeAtScreen(clientX, clientY) {
+    if (!this.layout) return null;
+    const rect = this.svg.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return null;
+    }
+    const world = this.screenToWorld(clientX, clientY);
+    for (const [id, item] of this.layout.nodeMap.entries()) {
+      if (
+        world.x >= item.x - 14 &&
+        world.x <= item.x + item.w + 14 &&
+        world.y >= item.y - 12 &&
+        world.y <= item.y + item.h + 12
+      ) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  setExternalDropFeedback(targetItem, active) {
+    this.layers.nodes.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+    if (!active) {
+      this._renderBanner();
+      return;
+    }
+    if (targetItem) {
+      this.layers.nodes.querySelector(`[data-node-id="${targetItem.id}"]`)?.classList.add('drop-target');
+      this.canvasBanner.classList.remove('hidden');
+      this.canvasBanner.innerHTML = `<span>📥 放開即可將內容加入節點「<b>${targetItem.node.title.slice(0, 24)}</b>」</span>`;
+    } else {
+      this.canvasBanner.classList.remove('hidden');
+      this.canvasBanner.innerHTML = `<span>📥 放開即可在此位置建立新主題，或匯入心智圖檔案</span>`;
+    }
+  }
+
   render(reason = 'update') {
     const sheet = store.getActiveSheet();
     if (!sheet) return;
