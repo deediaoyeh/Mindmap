@@ -746,10 +746,14 @@ export class MindMapCanvas {
         }
       }
 
-      // Collapse / Expand badge
-      if (node.children && node.children.length > 0 && item.depth > 0) {
-        const cx = item.dir === -1 ? x - 11 : x + w + 11;
-        const cy = y + h / 2;
+      // Collapse / Expand badge (positioned smartly by layout axis)
+      const isVerticalDown = item.layoutAxis === 'vertical-down';
+      const isTreeVertical = item.layoutAxis === 'tree-vertical';
+      const hasVisibleCollapse = node.children && node.children.length > 0 && item.depth > 0;
+
+      if (hasVisibleCollapse) {
+        const cx = isVerticalDown ? (x + w / 2) : (item.dir === -1 ? x - 11 : x + w + 11);
+        const cy = isVerticalDown ? (y + h + 11) : (y + h / 2);
         const colG = el('g', { class: 'collapse-badge', 'data-collapse-id': node.id }, g);
         el('circle', {
           cx, cy, r: 9,
@@ -767,13 +771,32 @@ export class MindMapCanvas {
         ct.textContent = node.collapsed ? `+${store.countDescendants(node)}` : '−';
       }
 
-      // XMind-style Quick Add (+) button on hover/select
-      const qx = item.dir === -1 ? x - 28 : x + w + (node.children.length > 0 && item.depth > 0 ? 28 : 14);
-      const qy = y + h / 2;
+      // XMind-style Dual Quick-Add Buttons on hover/select:
+      // 1) Purple (+) = Add Child / Sub-branch (Tab)
+      const childBtnX = isVerticalDown
+        ? (x + w / 2)
+        : (item.dir === -1 ? x - (hasVisibleCollapse ? 28 : 14) : x + w + (hasVisibleCollapse ? 28 : 14));
+      const childBtnY = isVerticalDown
+        ? (y + h + (hasVisibleCollapse ? 29 : 14))
+        : (y + h / 2);
+      const childLabel = item.depth === 0 ? '新增主主題 (Tab)' : item.depth === 1 ? '新增子主題 (Tab)' : '新增分子題 (Tab)';
+
       const qG = el('g', { class: 'node-quick-add', 'data-quick-add': node.id, style: 'cursor:pointer' }, g);
-      el('circle', { cx: qx, cy: qy, r: 9, fill: '#4f46e5' }, qG);
-      const qt = el('text', { x: qx, y: qy + 4, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 13, 'font-weight': 700 }, qG);
+      el('circle', { cx: childBtnX, cy: childBtnY, r: 9.5, fill: '#4f46e5', stroke: '#ffffff', 'stroke-width': 1.4 }, qG);
+      const qt = el('text', { x: childBtnX, y: childBtnY + 4, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 13, 'font-weight': 700 }, qG);
       qt.textContent = '+';
+      el('title', {}, qG).textContent = childLabel;
+
+      // 2) Teal (+) = Add Sibling Topic (Enter) — placed directly in sibling direction!
+      if (item.depth > 0 && !item.floatingId) {
+        const sibBtnX = isVerticalDown ? (x + w + 14) : isTreeVertical ? (x + 22) : (x + w / 2);
+        const sibBtnY = isVerticalDown ? (y + h / 2) : (y + h + 13);
+        const sG = el('g', { class: 'node-quick-add', 'data-quick-sibling': node.id, style: 'cursor:pointer' }, g);
+        el('circle', { cx: sibBtnX, cy: sibBtnY, r: 9.5, fill: '#0d9488', stroke: '#ffffff', 'stroke-width': 1.4 }, sG);
+        const st = el('text', { x: sibBtnX, y: sibBtnY + 4, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 13, 'font-weight': 700 }, sG);
+        st.textContent = '+';
+        el('title', {}, sG).textContent = '新增同層主題 (Enter)';
+      }
     }
   }
 
@@ -839,9 +862,10 @@ export class MindMapCanvas {
     const pos = this.worldToScreen(item.x + item.w / 2, item.y - 12);
     const rect = this.svg.getBoundingClientRect();
     const isRoot = id === store.getActiveSheet().root.id;
+    const childBtnText = isRoot ? '＋主主題' : (item.depth >= 2 ? '＋分子題' : '＋子主題');
     this.floatingToolbar.innerHTML = `
-      <button class="ft-btn" data-ft="child" title="新增子主題 (Tab)">＋子主題</button>
-      <button class="ft-btn" data-ft="sibling" title="新增同層主題 (Enter)">＋同層</button>
+      <button class="ft-btn" data-ft="child" title="新增下一層主題 (Tab)">${childBtnText}</button>
+      <button class="ft-btn" data-ft="sibling" title="新增同層兄弟主題 (Enter)">＋同層</button>
       <button class="ft-btn" data-ft="files" title="從本機或連結批次新增檔案">📎檔案</button>
       <button class="ft-btn" data-ft="rel" title="建立關聯線">↗關聯</button>
       <button class="ft-btn" data-ft="boundary" title="外框">▢外框</button>
@@ -1042,11 +1066,19 @@ export class MindMapCanvas {
         return;
       }
 
-      // Quick Add (+) click
+      // Quick Add Child (+) click
       const quickAdd = e.target.closest('[data-quick-add]');
       if (quickAdd) {
         e.stopPropagation();
         store.addChild(quickAdd.dataset.quickAdd);
+        return;
+      }
+
+      // Quick Add Sibling (+) click
+      const quickSib = e.target.closest('[data-quick-sibling]');
+      if (quickSib) {
+        e.stopPropagation();
+        store.addSibling(quickSib.dataset.quickSibling);
         return;
       }
 
@@ -1361,6 +1393,12 @@ export class MindMapCanvas {
       if (quickAdd) {
         e.preventDefault();
         store.addChild(quickAdd.dataset.quickAdd);
+        return;
+      }
+      const quickSib = target?.closest('[data-quick-sibling]');
+      if (quickSib) {
+        e.preventDefault();
+        store.addSibling(quickSib.dataset.quickSibling);
         return;
       }
 

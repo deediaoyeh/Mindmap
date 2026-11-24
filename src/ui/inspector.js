@@ -216,6 +216,7 @@ export class InspectorPanel {
             <span class="field-label">分支混排結構</span>
             <select id="tp-substruct" class="ui-select" style="width:140px;">
               <option value="">跟隨畫布預設</option>
+              <option value="tree-chart" ${node.structure === 'tree-chart' ? 'selected' : ''}>垂直子題＋分子題</option>
               <option value="logic-right" ${node.structure === 'logic-right' ? 'selected' : ''}>邏輯圖 (右)</option>
               <option value="logic-left" ${node.structure === 'logic-left' ? 'selected' : ''}>邏輯圖 (左)</option>
               <option value="org-chart" ${node.structure === 'org-chart' ? 'selected' : ''}>組織架構圖</option>

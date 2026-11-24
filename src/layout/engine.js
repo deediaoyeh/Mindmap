@@ -148,6 +148,7 @@ export function computeSheetLayout(sheet) {
       w: box.width,
       h: box.height,
       dir: 1, // 1 = right, -1 = left, 0 = center
+      layoutAxis: 'horizontal', // 'horizontal' | 'vertical-down' | 'tree-vertical'
       children: []
     };
 
@@ -165,8 +166,13 @@ export function computeSheetLayout(sheet) {
 
   function measureHorizontalSubtree(item, dir) {
     item.dir = dir;
+    item.layoutAxis = 'horizontal';
     if (item.structure === 'org-chart' && item.depth > 0) {
       measureOrgSubtree(item);
+      return;
+    }
+    if (item.structure === 'tree-chart' && item.depth > 0) {
+      measureTreeSubtree(item);
       return;
     }
     if (!item.children.length) {
@@ -190,10 +196,15 @@ export function computeSheetLayout(sheet) {
 
   function placeHorizontalSubtree(item, leftX, topY, dir, lineStyle) {
     item.dir = dir;
+    item.layoutAxis = 'horizontal';
     if (item.structure === 'org-chart' && item.depth > 0) {
-      // Place org subtree anchored from its top-left box
       const cx = dir >= 0 ? leftX + item.subW / 2 : leftX - item.subW / 2;
       placeOrgSubtree(item, cx, topY);
+      return;
+    }
+    if (item.structure === 'tree-chart' && item.depth > 0) {
+      const startX = dir >= 0 ? leftX : leftX - item.subW;
+      placeTreeSubtree(item, startX, topY);
       return;
     }
 
@@ -221,11 +232,16 @@ export function computeSheetLayout(sheet) {
   }
 
   // --- Org Chart (Top-Down) ---
-  const ORG_H_GAP = 22;
-  const ORG_V_GAP = 48;
+  const ORG_H_GAP = 26;
+  const ORG_V_GAP = 50;
 
   function measureOrgSubtree(item) {
     item.dir = 0;
+    item.layoutAxis = 'vertical-down';
+    if (item.structure === 'tree-chart' && item.depth > 0) {
+      measureTreeSubtree(item);
+      return;
+    }
     if (!item.children.length) {
       item.subW = item.w;
       item.subH = item.h;
@@ -244,6 +260,11 @@ export function computeSheetLayout(sheet) {
   }
 
   function placeOrgSubtree(item, centerX, topY) {
+    if (item.structure === 'tree-chart' && item.depth > 0) {
+      placeTreeSubtree(item, centerX - item.subW / 2, topY);
+      return;
+    }
+    item.layoutAxis = 'vertical-down';
     item.x = centerX - item.w / 2;
     item.y = topY;
     if (!item.children.length) return;
@@ -263,22 +284,27 @@ export function computeSheetLayout(sheet) {
     }
   }
 
-  // --- Tree Chart (Indented vertical branches) ---
-  const TREE_INDENT = 34;
-  const TREE_V_GAP = 14;
+  // --- Tree Chart (Indented vertical branches: siblings stack below, sub-branches indent right) ---
+  const TREE_INDENT = 32;
+  const TREE_V_GAP = 16;
 
   function measureTreeSubtree(item) {
     item.dir = 1;
+    item.layoutAxis = 'tree-vertical';
     let totalH = item.h;
+    let maxW = item.w;
     for (const c of item.children) {
       measureTreeSubtree(c);
       totalH += TREE_V_GAP + c.subH;
+      maxW = Math.max(maxW, TREE_INDENT + c.subW);
     }
     item.subH = totalH;
-    item.subW = item.w;
+    item.subW = maxW;
   }
 
   function placeTreeSubtree(item, x, y) {
+    item.dir = 1;
+    item.layoutAxis = 'tree-vertical';
     item.x = x;
     item.y = y;
     let curY = y + item.h + TREE_V_GAP;
@@ -292,6 +318,37 @@ export function computeSheetLayout(sheet) {
         dir: 1
       });
       curY += c.subH + TREE_V_GAP;
+    }
+  }
+
+  // --- Org-Tree Hybrid (Top-down horizontal Main Topics + vertical stacked Subtopics + indented Sub-branches!) ---
+  function layoutOrgTree(rootItem) {
+    rootItem.dir = 0;
+    rootItem.layoutAxis = 'vertical-down';
+    rootItem.x = -rootItem.w / 2;
+    rootItem.y = 0;
+    if (!rootItem.children.length) return;
+
+    const COL_GAP = 36;
+    for (const mainTopic of rootItem.children) {
+      measureTreeSubtree(mainTopic);
+      mainTopic.layoutAxis = 'vertical-down'; // depth-1 siblings expand horizontally
+    }
+    const totalW = rootItem.children.reduce((acc, c) => acc + c.subW, 0) + COL_GAP * (rootItem.children.length - 1);
+    let curX = -totalW / 2;
+    const nextY = rootItem.h + ORG_V_GAP;
+
+    for (const mainTopic of rootItem.children) {
+      placeTreeSubtree(mainTopic, curX, nextY);
+      mainTopic.layoutAxis = 'vertical-down';
+      edges.push({
+        from: rootItem,
+        to: mainTopic,
+        color: mainTopic.visual.branchColor,
+        style: 'org',
+        dir: 0
+      });
+      curX += mainTopic.subW + COL_GAP;
     }
   }
 
@@ -479,6 +536,9 @@ export function computeSheetLayout(sheet) {
     case 'org-chart':
       measureOrgSubtree(rootItem);
       placeOrgSubtree(rootItem, 0, 0);
+      break;
+    case 'org-tree':
+      layoutOrgTree(rootItem);
       break;
     case 'tree-chart':
       measureTreeSubtree(rootItem);

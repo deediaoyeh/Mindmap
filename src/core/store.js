@@ -352,11 +352,25 @@ class MindFlowStore {
     return matched;
   }
 
+  getNodeDepth(nodeId, sheet = this.getActiveSheet()) {
+    if (!sheet || !nodeId) return 0;
+    const found = this.getAllNodes(sheet).find(x => x.node.id === nodeId);
+    return found ? found.depth : 0;
+  }
+
+  _defaultTitleForDepth(depth) {
+    if (depth <= 1) return '主主題';
+    if (depth === 2) return '子主題';
+    return '分子題';
+  }
+
   // --- Node CRUD Operations ---
 
-  addChild(parentId = this.selectedNodeId, title = '子主題', autoEdit = true) {
+  addChild(parentId = this.selectedNodeId, title = null, autoEdit = true) {
     const sheet = this.getActiveSheet();
     const targetId = parentId || sheet.root.id;
+    const parentDepth = this.getNodeDepth(targetId, sheet);
+    const resolvedTitle = title !== null ? title : this._defaultTitleForDepth(parentDepth + 1);
     let created = null;
     this.mutate((s) => {
       const parent = this.findNode(targetId, s);
@@ -365,7 +379,7 @@ class MindFlowStore {
       const side = (parent.id === s.root.id && s.structure === 'mindmap')
         ? ((parent.children.filter(c => c.side === 'right').length <= parent.children.filter(c => c.side === 'left').length) ? 'right' : 'left')
         : null;
-      created = createNode(title, { side });
+      created = createNode(resolvedTitle, { side });
       parent.children.push(created);
     }, 'tree');
     if (created) {
@@ -376,19 +390,22 @@ class MindFlowStore {
     return created;
   }
 
-  addSibling(nodeId = this.selectedNodeId, title = '新主題', autoEdit = true) {
+  addSibling(nodeId = this.selectedNodeId, title = null, autoEdit = true) {
     const sheet = this.getActiveSheet();
-    const info = this.findNodeWithParent(nodeId || sheet.root.id, sheet);
+    const targetId = nodeId || sheet.root.id;
+    const info = this.findNodeWithParent(targetId, sheet);
     if (!info) return null;
     if (!info.parent) {
       // Root or floating root -> add child instead
       return this.addChild(info.node.id, title, autoEdit);
     }
+    const depth = this.getNodeDepth(targetId, sheet);
+    const resolvedTitle = title !== null ? title : this._defaultTitleForDepth(depth);
     let created = null;
     this.mutate((s) => {
-      const cur = this.findNodeWithParent(nodeId, s);
+      const cur = this.findNodeWithParent(targetId, s);
       if (!cur || !cur.parent) return;
-      created = createNode(title, { side: cur.node.side || null });
+      created = createNode(resolvedTitle, { side: cur.node.side || null });
       cur.parent.children.splice(cur.index + 1, 0, created);
     }, 'tree');
     if (created) {

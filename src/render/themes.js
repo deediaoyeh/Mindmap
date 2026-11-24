@@ -8,6 +8,7 @@ export const STRUCTURES = [
   { id: 'logic-right', name: '邏輯圖 (右)', sub: '向右展開', icon: '➡️' },
   { id: 'logic-left', name: '邏輯圖 (左)', sub: '向左展開', icon: '⬅️' },
   { id: 'org-chart', name: '組織架構圖', sub: '由上而下', icon: '🏛️' },
+  { id: 'org-tree', name: '組織樹狀圖', sub: '垂直子題＋分子題', icon: '📊' },
   { id: 'tree-chart', name: '樹狀圖', sub: '階層目錄', icon: '🌳' },
   { id: 'timeline', name: '時間軸', sub: '水平序列', icon: '⏳' },
   { id: 'fishbone', name: '魚骨圖', sub: '因果分析', icon: '🐟' },
